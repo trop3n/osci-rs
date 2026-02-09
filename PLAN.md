@@ -4,11 +4,13 @@ An oscilloscope music generator inspired by osci-render. Converts vector graphic
 
 ## Current Status
 
-**Completed through Milestone 3** - The app has:
-- Audio output with cpal (generates a circle: sine on X, cosine on Y)
+**Completed through Milestone 4** - The app has:
+- Audio output with cpal
 - XY oscilloscope display with persistence/afterglow
 - Settings panel (zoom, line width, intensity, color presets)
-- Modular code structure (audio/, render/)
+- Shape trait system with 11 shapes (Circle, Rectangle, Triangle, Square, Pentagon, Hexagon, Star, Line, Heart, Lissajous, Spiral)
+- Shape selection UI with per-shape parameters
+- Modular code structure (audio/, render/, shapes/)
 
 ## Project Structure
 
@@ -21,16 +23,22 @@ osci-rs/
 │   ├── 01-project-setup.md
 │   ├── 02-audio-fundamentals.md
 │   ├── 03-ownership-borrowing.md
-│   └── 04-egui-basics.md
+│   ├── 04-egui-basics.md
+│   └── 05-traits-generics.md
 └── src/
-    ├── main.rs             # App entry point
+    ├── main.rs             # App entry point, shape selection UI
     ├── audio/
     │   ├── mod.rs
     │   ├── buffer.rs       # SampleBuffer, XYSample (Arc<Mutex<T>>)
-    │   └── engine.rs       # AudioEngine (cpal output)
-    └── render/
+    │   └── engine.rs       # AudioEngine (cpal output, shape rendering)
+    ├── render/
+    │   ├── mod.rs
+    │   └── oscilloscope.rs # XY display widget with persistence
+    └── shapes/
         ├── mod.rs
-        └── oscilloscope.rs # XY display widget with persistence
+        ├── traits.rs       # Shape trait definition
+        ├── primitives.rs   # Circle, Line, Rectangle, Polygon
+        └── path.rs         # Arbitrary point sequences (Lissajous, Spiral, Heart)
 ```
 
 ## Tech Stack
@@ -60,22 +68,22 @@ osci-rs/
 
 ---
 
-### Phase 2: Core Features (Next)
+### Phase 2: Core Features
 
-#### Milestone 4: Basic Shapes
+#### Milestone 4: Basic Shapes ✅
 **Goal:** Draw shapes and hear them
 
 **Rust concepts:** Traits, generics, iterators
 
 **Deliverables:**
-- [ ] `Shape` trait definition
-- [ ] Circle, Line, Rectangle primitives
-- [ ] `Path` type (sequence of points)
-- [ ] Shape→audio sample conversion
-- [ ] UI to select and configure shapes
-- [ ] `docs/05-traits-generics.md`
+- [x] `Shape` trait definition
+- [x] Circle, Line, Rectangle, Polygon primitives
+- [x] `Path` type (Lissajous, Spiral, Heart)
+- [x] Shape→audio sample conversion
+- [x] UI to select and configure shapes (11 shape types)
+- [x] `docs/05-traits-generics.md`
 
-#### Milestone 5: Scene Composition
+#### Milestone 5: Scene Composition (Next)
 **Goal:** Combine multiple shapes
 
 - [ ] `Scene` struct holding multiple shapes
