@@ -4,8 +4,9 @@
 //! abstracting the cpal setup and stream management.
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use cpal::{FromSample, Sample};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, RwLock};
 
 use super::buffer::{SampleBuffer, XYSample};
 use crate::shapes::Shape;
@@ -28,6 +29,9 @@ impl Default for AudioConfig {
 }
 
 /// Pre-sampled shape data for the audio thread
+///
+/// Uses RwLock for better concurrency - audio thread only reads,
+/// main thread writes when shape changes.
 struct ShapeData {
     /// The sampled XY points
     samples: Vec<XYSample>,
@@ -41,6 +45,72 @@ impl Default for ShapeData {
             samples: Vec::new(),
             name: "None".to_string(),
         }
+    }
+}
+
+/// Write audio samples for any sample format
+fn write_audio_samples<T: Sample + FromSample<f32>>(
+    data: &mut [T],
+    channels: usize,
+    is_playing: &AtomicBool,
+    shape_data: &RwLock<ShapeData>,
+    sample_index: &AtomicUsize,
+    buffer: &SampleBuffer,
+) {
+    // Check if we should output audio
+    if !is_playing.load(Ordering::Relaxed) {
+        // Output silence
+        for sample in data.iter_mut() {
+            *sample = T::EQUILIBRIUM;
+        }
+        return;
+    }
+
+    // Try to read shape data (non-blocking for audio thread)
+    let shape_guard = match shape_data.try_read() {
+        Ok(guard) => guard,
+        Err(_) => {
+            // Couldn't get lock - output silence
+            for sample in data.iter_mut() {
+                *sample = T::EQUILIBRIUM;
+            }
+            return;
+        }
+    };
+
+    if shape_guard.samples.is_empty() {
+        // No shape data - output silence
+        for sample in data.iter_mut() {
+            *sample = T::EQUILIBRIUM;
+        }
+        return;
+    }
+
+    let num_shape_samples = shape_guard.samples.len();
+
+    // Generate audio samples
+    for frame in data.chunks_mut(channels) {
+        // Get current sample index and wrap
+        let idx = sample_index.load(Ordering::Relaxed) % num_shape_samples;
+        let xy = shape_guard.samples[idx];
+
+        // Output to audio channels (Left = X, Right = Y)
+        if channels >= 2 {
+            frame[0] = T::from_sample(xy.x);
+            frame[1] = T::from_sample(xy.y);
+            // Fill any extra channels with silence
+            for ch in frame.iter_mut().skip(2) {
+                *ch = T::EQUILIBRIUM;
+            }
+        } else {
+            frame[0] = T::from_sample((xy.x + xy.y) / 2.0); // Mono mix
+        }
+
+        // Push to visualization buffer
+        buffer.push(xy);
+
+        // Advance sample index
+        sample_index.fetch_add(1, Ordering::Relaxed);
     }
 }
 
@@ -61,8 +131,8 @@ pub struct AudioEngine {
     /// Current configuration
     pub config: AudioConfig,
 
-    /// Pre-sampled shape data shared with audio thread
-    shape_data: Arc<Mutex<ShapeData>>,
+    /// Pre-sampled shape data shared with audio thread (RwLock for better concurrency)
+    shape_data: Arc<RwLock<ShapeData>>,
 
     /// Current sample index (for audio thread)
     sample_index: Arc<AtomicUsize>,
@@ -88,7 +158,7 @@ impl AudioEngine {
             stream: None,
             buffer,
             config: AudioConfig::default(),
-            shape_data: Arc::new(Mutex::new(ShapeData::default())),
+            shape_data: Arc::new(RwLock::new(ShapeData::default())),
             sample_index: Arc::new(AtomicUsize::new(0)),
             status: "Ready".to_string(),
             sample_rate: 48000.0,
@@ -103,7 +173,7 @@ impl AudioEngine {
 
     /// Get the current shape name
     pub fn current_shape_name(&self) -> String {
-        self.shape_data.lock().unwrap().name.clone()
+        self.shape_data.read().unwrap().name.clone()
     }
 
     /// Set the shape to render
@@ -124,7 +194,7 @@ impl AudioEngine {
         }
 
         // Update shared shape data
-        if let Ok(mut data) = self.shape_data.lock() {
+        if let Ok(mut data) = self.shape_data.write() {
             data.samples = samples;
             data.name = shape.name().to_string();
         }
@@ -143,7 +213,7 @@ impl AudioEngine {
 
         // Check if we have a shape
         {
-            let data = self.shape_data.lock().unwrap();
+            let data = self.shape_data.read().unwrap();
             if data.samples.is_empty() {
                 self.status = "No shape set - select a shape first".to_string();
                 return;
@@ -189,59 +259,59 @@ impl AudioEngine {
         let sample_index = Arc::clone(&self.sample_index);
         let buffer = self.buffer.clone_ref();
 
-        // Build the output stream
-        let stream_result = match config.sample_format() {
-            cpal::SampleFormat::F32 => device.build_output_stream(
-                &config.into(),
-                move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-                    if !is_playing.load(Ordering::Relaxed) {
-                        // Output silence
-                        for sample in data.iter_mut() {
-                            *sample = 0.0;
-                        }
-                        return;
-                    }
+        // Build the output stream based on sample format
+        let sample_format = config.sample_format();
+        log::info!("Sample format: {:?}", sample_format);
 
-                    // Get shape samples (try_lock to avoid blocking audio thread)
-                    let shape_samples = if let Ok(shape) = shape_data.try_lock() {
-                        if shape.samples.is_empty() {
-                            return;
-                        }
-                        shape.samples.clone()
-                    } else {
-                        // Couldn't get lock - output silence this buffer
-                        for sample in data.iter_mut() {
-                            *sample = 0.0;
-                        }
-                        return;
-                    };
-
-                    let num_shape_samples = shape_samples.len();
-
-                    // Generate audio samples
-                    for frame in data.chunks_mut(channels) {
-                        // Get current sample index and wrap
-                        let idx = sample_index.load(Ordering::Relaxed) % num_shape_samples;
-                        let xy = shape_samples[idx];
-
-                        // Output to audio channels (Left = X, Right = Y)
-                        if channels >= 2 {
-                            frame[0] = xy.x;
-                            frame[1] = xy.y;
-                        } else {
-                            frame[0] = (xy.x + xy.y) / 2.0; // Mono mix
-                        }
-
-                        // Push to visualization buffer
-                        buffer.push(xy);
-
-                        // Advance sample index
-                        sample_index.fetch_add(1, Ordering::Relaxed);
-                    }
-                },
-                |err| log::error!("Audio stream error: {}", err),
-                None,
-            ),
+        let stream_result = match sample_format {
+            cpal::SampleFormat::F32 => {
+                let is_playing = Arc::clone(&is_playing);
+                let shape_data = Arc::clone(&shape_data);
+                let sample_index = Arc::clone(&sample_index);
+                let buffer = buffer.clone_ref();
+                device.build_output_stream(
+                    &config.into(),
+                    move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
+                        write_audio_samples(
+                            data, channels, &is_playing, &shape_data, &sample_index, &buffer,
+                        );
+                    },
+                    |err| log::error!("Audio stream error: {}", err),
+                    None,
+                )
+            }
+            cpal::SampleFormat::I16 => {
+                let is_playing = Arc::clone(&is_playing);
+                let shape_data = Arc::clone(&shape_data);
+                let sample_index = Arc::clone(&sample_index);
+                let buffer = buffer.clone_ref();
+                device.build_output_stream(
+                    &config.into(),
+                    move |data: &mut [i16], _: &cpal::OutputCallbackInfo| {
+                        write_audio_samples(
+                            data, channels, &is_playing, &shape_data, &sample_index, &buffer,
+                        );
+                    },
+                    |err| log::error!("Audio stream error: {}", err),
+                    None,
+                )
+            }
+            cpal::SampleFormat::U16 => {
+                let is_playing = Arc::clone(&is_playing);
+                let shape_data = Arc::clone(&shape_data);
+                let sample_index = Arc::clone(&sample_index);
+                let buffer = buffer.clone_ref();
+                device.build_output_stream(
+                    &config.into(),
+                    move |data: &mut [u16], _: &cpal::OutputCallbackInfo| {
+                        write_audio_samples(
+                            data, channels, &is_playing, &shape_data, &sample_index, &buffer,
+                        );
+                    },
+                    |err| log::error!("Audio stream error: {}", err),
+                    None,
+                )
+            }
             format => {
                 self.status = format!("Unsupported sample format: {:?}", format);
                 log::error!("Unsupported sample format: {:?}", format);
@@ -257,7 +327,7 @@ impl AudioEngine {
                     return;
                 }
 
-                let shape_name = self.shape_data.lock().unwrap().name.clone();
+                let shape_name = self.shape_data.read().unwrap().name.clone();
                 self.is_playing.store(true, Ordering::Relaxed);
                 self.stream = Some(s);
                 self.status = format!(
