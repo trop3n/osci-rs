@@ -5,7 +5,7 @@
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, Sample};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 
 use super::buffer::{SampleBuffer, XYSample};
@@ -48,6 +48,64 @@ impl Default for ShapeData {
     }
 }
 
+/// Effect parameters shared with audio thread
+#[derive(Clone)]
+pub struct EffectParams {
+    /// Rotation speed in radians per second
+    pub rotation_speed: f32,
+    /// Whether rotation is enabled
+    pub rotation_enabled: bool,
+    /// Scale LFO frequency
+    pub scale_lfo_freq: f32,
+    /// Scale LFO minimum
+    pub scale_lfo_min: f32,
+    /// Scale LFO maximum
+    pub scale_lfo_max: f32,
+    /// Whether scale LFO is enabled
+    pub scale_lfo_enabled: bool,
+}
+
+impl Default for EffectParams {
+    fn default() -> Self {
+        Self {
+            rotation_speed: 0.0,
+            rotation_enabled: false,
+            scale_lfo_freq: 1.0,
+            scale_lfo_min: 0.8,
+            scale_lfo_max: 1.2,
+            scale_lfo_enabled: false,
+        }
+    }
+}
+
+/// Apply effects to an XY sample
+fn apply_effects(x: f32, y: f32, time: f32, effects: &EffectParams) -> (f32, f32) {
+    let mut rx = x;
+    let mut ry = y;
+
+    // Apply rotation
+    if effects.rotation_enabled && effects.rotation_speed != 0.0 {
+        let angle = effects.rotation_speed * time;
+        let cos_a = angle.cos();
+        let sin_a = angle.sin();
+        let new_x = rx * cos_a - ry * sin_a;
+        let new_y = rx * sin_a + ry * cos_a;
+        rx = new_x;
+        ry = new_y;
+    }
+
+    // Apply scale LFO
+    if effects.scale_lfo_enabled {
+        let phase = (time * effects.scale_lfo_freq * std::f32::consts::TAU).sin();
+        let normalized = (phase + 1.0) / 2.0; // 0.0 to 1.0
+        let scale = effects.scale_lfo_min + normalized * (effects.scale_lfo_max - effects.scale_lfo_min);
+        rx *= scale;
+        ry *= scale;
+    }
+
+    (rx, ry)
+}
+
 /// How often to push samples to the visualization buffer
 /// (every Nth sample to reduce lock contention)
 const VIZ_DECIMATION: usize = 8;
@@ -60,6 +118,9 @@ fn write_audio_samples<T: Sample + FromSample<f32>>(
     shape_data: &RwLock<ShapeData>,
     sample_index: &AtomicUsize,
     buffer: &SampleBuffer,
+    effect_params: &RwLock<EffectParams>,
+    total_samples: &AtomicU64,
+    sample_rate: f32,
 ) {
     // Check if we should output audio
     if !is_playing.load(Ordering::Relaxed) {
@@ -94,7 +155,13 @@ fn write_audio_samples<T: Sample + FromSample<f32>>(
 
     // Get current index and calculate new index after this buffer
     let start_idx = sample_index.load(Ordering::Relaxed);
+    let start_total = total_samples.load(Ordering::Relaxed);
     let num_frames = data.len() / channels;
+
+    // Try to get effect params (use defaults if locked)
+    let effects = effect_params.try_read()
+        .map(|e| e.clone())
+        .unwrap_or_default();
 
     // Generate audio samples
     for (frame_num, frame) in data.chunks_mut(channels).enumerate() {
@@ -102,27 +169,37 @@ fn write_audio_samples<T: Sample + FromSample<f32>>(
         let idx = (start_idx + frame_num) % num_shape_samples;
         let xy = shape_guard.samples[idx];
 
+        // Calculate time for effects
+        let current_sample = start_total + frame_num as u64;
+        let time = current_sample as f32 / sample_rate;
+
+        // Apply effects
+        let (ex, ey) = apply_effects(xy.x, xy.y, time, &effects);
+
         // Output to audio channels (Left = X, Right = Y)
         if channels >= 2 {
-            frame[0] = T::from_sample(xy.x);
-            frame[1] = T::from_sample(xy.y);
+            frame[0] = T::from_sample(ex);
+            frame[1] = T::from_sample(ey);
             // Fill any extra channels with silence
             for ch in frame.iter_mut().skip(2) {
                 *ch = T::EQUILIBRIUM;
             }
         } else {
-            frame[0] = T::from_sample((xy.x + xy.y) / 2.0); // Mono mix
+            frame[0] = T::from_sample((ex + ey) / 2.0); // Mono mix
         }
 
-        // Push to visualization buffer less frequently to reduce lock contention
+        // Push effected samples to visualization buffer
         if (start_idx + frame_num) % VIZ_DECIMATION == 0 {
-            buffer.push(xy);
+            buffer.push(XYSample::new(ex, ey));
         }
     }
 
     // Update sample index with wrap-around to prevent overflow
     let new_idx = (start_idx + num_frames) % num_shape_samples;
     sample_index.store(new_idx, Ordering::Relaxed);
+
+    // Update total sample counter for time tracking
+    total_samples.fetch_add(num_frames as u64, Ordering::Relaxed);
 }
 
 /// High-level audio output engine
@@ -156,6 +233,12 @@ pub struct AudioEngine {
 
     /// Number of audio samples per shape trace
     samples_per_shape: usize,
+
+    /// Effect parameters shared with audio thread
+    effect_params: Arc<RwLock<EffectParams>>,
+
+    /// Total samples played (for time tracking in effects)
+    total_samples: Arc<AtomicU64>,
 }
 
 impl AudioEngine {
@@ -174,6 +257,15 @@ impl AudioEngine {
             status: "Ready".to_string(),
             sample_rate: 48000.0,
             samples_per_shape: 600, // 48000 / 80 = 600 samples per shape at 80Hz
+            effect_params: Arc::new(RwLock::new(EffectParams::default())),
+            total_samples: Arc::new(AtomicU64::new(0)),
+        }
+    }
+
+    /// Update effect parameters
+    pub fn set_effects(&self, params: EffectParams) {
+        if let Ok(mut effects) = self.effect_params.write() {
+            *effects = params;
         }
     }
 
@@ -268,7 +360,10 @@ impl AudioEngine {
         let is_playing = Arc::clone(&self.is_playing);
         let shape_data = Arc::clone(&self.shape_data);
         let sample_index = Arc::clone(&self.sample_index);
+        let effect_params = Arc::clone(&self.effect_params);
+        let total_samples = Arc::clone(&self.total_samples);
         let buffer = self.buffer.clone_ref();
+        let sample_rate = self.sample_rate;
 
         // Build the output stream based on sample format
         let sample_format = config.sample_format();
@@ -279,12 +374,15 @@ impl AudioEngine {
                 let is_playing = Arc::clone(&is_playing);
                 let shape_data = Arc::clone(&shape_data);
                 let sample_index = Arc::clone(&sample_index);
+                let effect_params = Arc::clone(&effect_params);
+                let total_samples = Arc::clone(&total_samples);
                 let buffer = buffer.clone_ref();
                 device.build_output_stream(
                     &config.into(),
                     move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
                         write_audio_samples(
                             data, channels, &is_playing, &shape_data, &sample_index, &buffer,
+                            &effect_params, &total_samples, sample_rate,
                         );
                     },
                     |err| log::error!("Audio stream error: {}", err),
@@ -295,12 +393,15 @@ impl AudioEngine {
                 let is_playing = Arc::clone(&is_playing);
                 let shape_data = Arc::clone(&shape_data);
                 let sample_index = Arc::clone(&sample_index);
+                let effect_params = Arc::clone(&effect_params);
+                let total_samples = Arc::clone(&total_samples);
                 let buffer = buffer.clone_ref();
                 device.build_output_stream(
                     &config.into(),
                     move |data: &mut [i16], _: &cpal::OutputCallbackInfo| {
                         write_audio_samples(
                             data, channels, &is_playing, &shape_data, &sample_index, &buffer,
+                            &effect_params, &total_samples, sample_rate,
                         );
                     },
                     |err| log::error!("Audio stream error: {}", err),
@@ -311,12 +412,15 @@ impl AudioEngine {
                 let is_playing = Arc::clone(&is_playing);
                 let shape_data = Arc::clone(&shape_data);
                 let sample_index = Arc::clone(&sample_index);
+                let effect_params = Arc::clone(&effect_params);
+                let total_samples = Arc::clone(&total_samples);
                 let buffer = buffer.clone_ref();
                 device.build_output_stream(
                     &config.into(),
                     move |data: &mut [u16], _: &cpal::OutputCallbackInfo| {
                         write_audio_samples(
                             data, channels, &is_playing, &shape_data, &sample_index, &buffer,
+                            &effect_params, &total_samples, sample_rate,
                         );
                     },
                     |err| log::error!("Audio stream error: {}", err),

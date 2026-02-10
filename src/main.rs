@@ -12,10 +12,12 @@
 use eframe::egui;
 
 mod audio;
+mod effects;
 mod render;
 mod shapes;
 
-use audio::{AudioEngine, SampleBuffer};
+use audio::{AudioEngine, EffectParams, SampleBuffer};
+use effects::LfoWaveform;
 use render::Oscilloscope;
 use shapes::{Circle, Line, Rectangle, Polygon, Path, Scene};
 
@@ -170,6 +172,18 @@ struct OsciApp {
     // Scene composition
     scene_entries: Vec<SceneEntry>,
     scene_shape_to_add: ShapeType,
+
+    // Effects
+    enable_rotation: bool,
+    rotation_speed: f32,
+    enable_scale_lfo: bool,
+    scale_lfo_freq: f32,
+    scale_lfo_min: f32,
+    scale_lfo_max: f32,
+    scale_lfo_waveform: LfoWaveform,
+
+    // Time tracking for effects
+    start_time: std::time::Instant,
 }
 
 impl OsciApp {
@@ -192,6 +206,17 @@ impl OsciApp {
             shape_needs_update: false,
             scene_entries: Vec::new(),
             scene_shape_to_add: ShapeType::Circle,
+
+            // Effects
+            enable_rotation: false,
+            rotation_speed: 1.0,
+            enable_scale_lfo: false,
+            scale_lfo_freq: 2.0,
+            scale_lfo_min: 0.8,
+            scale_lfo_max: 1.2,
+            scale_lfo_waveform: LfoWaveform::Sine,
+
+            start_time: std::time::Instant::now(),
         }
     }
 
@@ -602,6 +627,62 @@ impl eframe::App for OsciApp {
 
                     ui.separator();
 
+                    // Effects settings
+                    ui.collapsing("Effects", |ui| {
+                        // Rotation effect
+                        ui.checkbox(&mut self.enable_rotation, "Rotation");
+                        if self.enable_rotation {
+                            ui.add(
+                                egui::Slider::new(&mut self.rotation_speed, -5.0..=5.0)
+                                    .text("Speed (rad/s)")
+                            );
+                        }
+
+                        ui.separator();
+
+                        // Scale LFO effect
+                        ui.checkbox(&mut self.enable_scale_lfo, "Pulsing Scale");
+                        if self.enable_scale_lfo {
+                            ui.add(
+                                egui::Slider::new(&mut self.scale_lfo_freq, 0.1..=10.0)
+                                    .text("Frequency (Hz)")
+                            );
+                            ui.add(
+                                egui::Slider::new(&mut self.scale_lfo_min, 0.1..=1.5)
+                                    .text("Min scale")
+                            );
+                            ui.add(
+                                egui::Slider::new(&mut self.scale_lfo_max, 0.5..=2.0)
+                                    .text("Max scale")
+                            );
+
+                            // Waveform selection
+                            egui::ComboBox::from_label("Waveform")
+                                .selected_text(self.scale_lfo_waveform.name())
+                                .show_ui(ui, |ui| {
+                                    for waveform in LfoWaveform::all() {
+                                        ui.selectable_value(
+                                            &mut self.scale_lfo_waveform,
+                                            *waveform,
+                                            waveform.name(),
+                                        );
+                                    }
+                                });
+                        }
+
+                        // Update effect parameters on the audio engine
+                        self.audio.set_effects(EffectParams {
+                            rotation_speed: self.rotation_speed,
+                            rotation_enabled: self.enable_rotation,
+                            scale_lfo_freq: self.scale_lfo_freq,
+                            scale_lfo_min: self.scale_lfo_min,
+                            scale_lfo_max: self.scale_lfo_max,
+                            scale_lfo_enabled: self.enable_scale_lfo,
+                        });
+                    });
+
+                    ui.separator();
+
                     // Display settings
                     ui.collapsing("Display", |ui| {
                         ui.add(egui::Slider::new(&mut self.oscilloscope.settings.zoom, 0.1..=2.0).text("Zoom"));
@@ -649,7 +730,7 @@ impl eframe::App for OsciApp {
                     ui.separator();
                     ui.small(format!("Samples: {}", samples.len()));
                     ui.separator();
-                    ui.small("Milestone 5: Scene Composition");
+                    ui.small("Milestone 6: Effects & Modulation");
                 });
             });
         });
