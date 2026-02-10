@@ -4,14 +4,17 @@
 //! - `Shape` trait for abstracting over different shape types
 //! - Primitive shapes: Circle, Line, Rectangle, etc.
 //! - Path type for arbitrary point sequences
+//! - Scene type for composing multiple shapes
 
 mod traits;
 mod primitives;
 mod path;
+mod scene;
 
 pub use traits::Shape;
 pub use primitives::{Circle, Line, Rectangle, Polygon};
 pub use path::Path;
+pub use scene::{Scene, SceneShape};
 
 use crate::audio::XYSample;
 

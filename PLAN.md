@@ -4,12 +4,14 @@ An oscilloscope music generator inspired by osci-render. Converts vector graphic
 
 ## Current Status
 
-**Completed through Milestone 4** - The app has:
-- Audio output with cpal
+**Completed through Milestone 5** - The app has:
+- Audio output with cpal (crackling fixed)
 - XY oscilloscope display with persistence/afterglow
 - Settings panel (zoom, line width, intensity, color presets)
-- Shape trait system with 11 shapes (Circle, Rectangle, Triangle, Square, Pentagon, Hexagon, Star, Line, Heart, Lissajous, Spiral)
-- Shape selection UI with per-shape parameters
+- Shape trait system with 11 shapes
+- Single shape mode with per-shape parameters
+- Scene composition mode (combine multiple shapes)
+- Scene editor UI with weights, ordering, enable/disable
 - Modular code structure (audio/, render/, shapes/)
 
 ## Project Structure
@@ -24,9 +26,10 @@ osci-rs/
 │   ├── 02-audio-fundamentals.md
 │   ├── 03-ownership-borrowing.md
 │   ├── 04-egui-basics.md
-│   └── 05-traits-generics.md
+│   ├── 05-traits-generics.md
+│   └── 06-collections-lifetimes.md
 └── src/
-    ├── main.rs             # App entry point, shape selection UI
+    ├── main.rs             # App entry point, mode toggle, scene editor
     ├── audio/
     │   ├── mod.rs
     │   ├── buffer.rs       # SampleBuffer, XYSample (Arc<Mutex<T>>)
@@ -38,7 +41,8 @@ osci-rs/
         ├── mod.rs
         ├── traits.rs       # Shape trait definition
         ├── primitives.rs   # Circle, Line, Rectangle, Polygon
-        └── path.rs         # Arbitrary point sequences (Lissajous, Spiral, Heart)
+        ├── path.rs         # Arbitrary point sequences (Lissajous, Spiral, Heart)
+        └── scene.rs        # Multi-shape composition with weights
 ```
 
 ## Tech Stack
@@ -83,16 +87,16 @@ osci-rs/
 - [x] UI to select and configure shapes (11 shape types)
 - [x] `docs/05-traits-generics.md`
 
-#### Milestone 5: Scene Composition (Next)
+#### Milestone 5: Scene Composition ✅
 **Goal:** Combine multiple shapes
 
-- [ ] `Scene` struct holding multiple shapes
-- [ ] Shape ordering and time allocation
-- [ ] Per-shape frequency control
-- [ ] Scene editor UI
-- [ ] `docs/06-collections-lifetimes.md`
+- [x] `Scene` struct holding multiple shapes
+- [x] Shape ordering and time allocation (weight-based)
+- [x] Per-shape weight control
+- [x] Scene editor UI (add, remove, reorder, enable/disable)
+- [x] `docs/06-collections-lifetimes.md`
 
-#### Milestone 6: Effects & Modulation
+#### Milestone 6: Effects & Modulation (Next)
 **Goal:** Add rotation, scaling, LFOs
 
 - [ ] `Effect` trait

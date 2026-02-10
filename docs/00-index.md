@@ -13,8 +13,8 @@ Welcome to the osci-rs learning documentation. This series of documents accompan
 
 ### Phase 2: Core Features
 - [[05-traits-generics|05 - Traits & Generics]] - Shape trait, generics, parametric equations
-- 06 - Collections & Lifetimes (Coming Soon)
-- 07 - Trait Objects
+- [[06-collections-lifetimes|06 - Collections & Dynamic Dispatch]] - Vec, Box<dyn Trait>, Scene composition
+- 07 - Trait Objects (Coming Soon)
 - 08 - Error Handling
 - 09 - Image Processing
 - 10 - Fonts & Bézier Curves
@@ -94,7 +94,8 @@ osci-rs/
         ├── mod.rs          # Module exports
         ├── traits.rs       # Shape trait definition
         ├── primitives.rs   # Circle, Line, Rectangle, Polygon
-        └── path.rs         # Arbitrary point sequences
+        ├── path.rs         # Arbitrary point sequences
+        └── scene.rs        # Multi-shape composition
 ```
 
 Coming in future milestones:

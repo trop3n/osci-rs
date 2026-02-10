@@ -3,12 +3,11 @@
 //! This application converts vector graphics into XY audio signals
 //! that can be displayed on an oscilloscope.
 //!
-//! ## Milestone 4: Basic Shapes
+//! ## Milestone 5: Scene Composition
 //! This version adds:
-//! - Shape trait for abstracting drawable shapes
-//! - Primitive shapes: Circle, Line, Rectangle, Polygon
-//! - Path type for arbitrary point sequences
-//! - Shape selection UI
+//! - Scene type for combining multiple shapes
+//! - Scene editor UI with shape ordering and weights
+//! - Single shape mode and scene mode toggle
 
 use eframe::egui;
 
@@ -18,7 +17,7 @@ mod shapes;
 
 use audio::{AudioEngine, SampleBuffer};
 use render::Oscilloscope;
-use shapes::{Circle, Line, Rectangle, Polygon, Path, Shape};
+use shapes::{Circle, Line, Rectangle, Polygon, Path, Scene};
 
 /// Buffer size for audio samples
 const BUFFER_SIZE: usize = 2048;
@@ -91,6 +90,30 @@ impl ShapeType {
     }
 }
 
+/// Editor mode - single shape or scene composition
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum EditorMode {
+    SingleShape,
+    Scene,
+}
+
+/// Entry in the scene editor (for UI state)
+struct SceneEntry {
+    shape_type: ShapeType,
+    weight: f32,
+    enabled: bool,
+}
+
+impl SceneEntry {
+    fn new(shape_type: ShapeType) -> Self {
+        Self {
+            shape_type,
+            weight: 1.0,
+            enabled: true,
+        }
+    }
+}
+
 /// Shape parameters (varies by shape type)
 struct ShapeParams {
     // Common
@@ -136,10 +159,17 @@ struct OsciApp {
     oscilloscope: Oscilloscope,
     show_settings: bool,
 
-    // Shape selection
+    // Editor mode
+    editor_mode: EditorMode,
+
+    // Single shape selection
     selected_shape: ShapeType,
     shape_params: ShapeParams,
     shape_needs_update: bool,
+
+    // Scene composition
+    scene_entries: Vec<SceneEntry>,
+    scene_shape_to_add: ShapeType,
 }
 
 impl OsciApp {
@@ -156,9 +186,12 @@ impl OsciApp {
             audio,
             oscilloscope: Oscilloscope::new(),
             show_settings: true, // Show by default for shape selection
+            editor_mode: EditorMode::SingleShape,
             selected_shape: ShapeType::Circle,
             shape_params: ShapeParams::default(),
             shape_needs_update: false,
+            scene_entries: Vec::new(),
+            scene_shape_to_add: ShapeType::Circle,
         }
     }
 
@@ -230,6 +263,57 @@ impl OsciApp {
         }
         self.shape_needs_update = false;
     }
+
+    /// Build and set the scene from scene entries
+    fn update_scene(&mut self) {
+        let mut scene = Scene::new("Custom Scene");
+
+        for entry in &self.scene_entries {
+            if entry.enabled {
+                // Create shape based on type (using default params for simplicity)
+                match entry.shape_type {
+                    ShapeType::Circle => {
+                        scene.add_weighted(Circle::new(0.7), entry.weight);
+                    }
+                    ShapeType::Rectangle => {
+                        scene.add_weighted(Rectangle::new(1.0, 0.6), entry.weight);
+                    }
+                    ShapeType::Triangle => {
+                        scene.add_weighted(Polygon::triangle(0.7), entry.weight);
+                    }
+                    ShapeType::Square => {
+                        scene.add_weighted(Rectangle::square(0.7), entry.weight);
+                    }
+                    ShapeType::Pentagon => {
+                        scene.add_weighted(Polygon::pentagon(0.7), entry.weight);
+                    }
+                    ShapeType::Hexagon => {
+                        scene.add_weighted(Polygon::hexagon(0.7), entry.weight);
+                    }
+                    ShapeType::Star => {
+                        scene.add_weighted(Polygon::star(5, 0.7, 0.3), entry.weight);
+                    }
+                    ShapeType::Line => {
+                        scene.add_weighted(Line::new(-0.5, -0.5, 0.5, 0.5), entry.weight);
+                    }
+                    ShapeType::Heart => {
+                        scene.add_weighted(Path::heart(0.7, 200), entry.weight);
+                    }
+                    ShapeType::Lissajous => {
+                        scene.add_weighted(Path::lissajous(3.0, 2.0, std::f32::consts::FRAC_PI_2, 500), entry.weight);
+                    }
+                    ShapeType::Spiral => {
+                        scene.add_weighted(Path::spiral(0.1, 0.7, 3.0, 300), entry.weight);
+                    }
+                }
+            }
+        }
+
+        if !scene.is_empty() {
+            self.audio.set_shape(&scene);
+        }
+        self.shape_needs_update = false;
+    }
 }
 
 impl eframe::App for OsciApp {
@@ -238,7 +322,10 @@ impl eframe::App for OsciApp {
 
         // Update shape if parameters changed
         if self.shape_needs_update {
-            self.update_shape();
+            match self.editor_mode {
+                EditorMode::SingleShape => self.update_shape(),
+                EditorMode::Scene => self.update_scene(),
+            }
         }
 
         // Top panel
@@ -268,27 +355,43 @@ impl eframe::App for OsciApp {
         // Settings panel
         if self.show_settings {
             egui::SidePanel::left("settings_panel")
-                .min_width(220.0)
+                .min_width(240.0)
                 .show(ctx, |ui| {
-                    ui.heading("Shape");
+                    // Mode toggle
+                    ui.horizontal(|ui| {
+                        ui.label("Mode:");
+                        if ui.selectable_label(self.editor_mode == EditorMode::SingleShape, "Single").clicked() {
+                            self.editor_mode = EditorMode::SingleShape;
+                            self.shape_needs_update = true;
+                        }
+                        if ui.selectable_label(self.editor_mode == EditorMode::Scene, "Scene").clicked() {
+                            self.editor_mode = EditorMode::Scene;
+                            self.shape_needs_update = true;
+                        }
+                    });
                     ui.separator();
 
-                    // Shape type selection
-                    egui::ComboBox::from_label("Type")
-                        .selected_text(self.selected_shape.name())
-                        .show_ui(ui, |ui| {
-                            for shape_type in ShapeType::all() {
-                                if ui.selectable_value(
-                                    &mut self.selected_shape,
-                                    *shape_type,
-                                    shape_type.name(),
-                                ).clicked() {
-                                    self.shape_needs_update = true;
-                                }
-                            }
-                        });
+                    match self.editor_mode {
+                        EditorMode::SingleShape => {
+                            ui.heading("Shape");
+                            ui.separator();
 
-                    ui.separator();
+                            // Shape type selection
+                            egui::ComboBox::from_label("Type")
+                                .selected_text(self.selected_shape.name())
+                                .show_ui(ui, |ui| {
+                                    for shape_type in ShapeType::all() {
+                                        if ui.selectable_value(
+                                            &mut self.selected_shape,
+                                            *shape_type,
+                                            shape_type.name(),
+                                        ).clicked() {
+                                            self.shape_needs_update = true;
+                                        }
+                                    }
+                                });
+
+                            ui.separator();
 
                     // Shape-specific parameters
                     ui.label("Parameters:");
@@ -377,6 +480,105 @@ impl eframe::App for OsciApp {
                             }
                         }
                     }
+                        } // end SingleShape
+
+                        EditorMode::Scene => {
+                            ui.heading("Scene");
+                            ui.separator();
+
+                            // Add shape to scene
+                            ui.horizontal(|ui| {
+                                egui::ComboBox::from_id_salt("add_shape")
+                                    .selected_text(self.scene_shape_to_add.name())
+                                    .show_ui(ui, |ui| {
+                                        for shape_type in ShapeType::all() {
+                                            ui.selectable_value(
+                                                &mut self.scene_shape_to_add,
+                                                *shape_type,
+                                                shape_type.name(),
+                                            );
+                                        }
+                                    });
+                                if ui.button("+ Add").clicked() {
+                                    self.scene_entries.push(SceneEntry::new(self.scene_shape_to_add));
+                                    self.shape_needs_update = true;
+                                }
+                            });
+
+                            ui.separator();
+
+                            if self.scene_entries.is_empty() {
+                                ui.label("No shapes in scene. Add shapes above.");
+                            } else {
+                                ui.label(format!("{} shapes:", self.scene_entries.len()));
+
+                                // List of shapes with controls
+                                let mut to_remove: Option<usize> = None;
+                                let mut to_move_up: Option<usize> = None;
+                                let mut to_move_down: Option<usize> = None;
+
+                                egui::ScrollArea::vertical().max_height(200.0).show(ui, |ui| {
+                                    for (i, entry) in self.scene_entries.iter_mut().enumerate() {
+                                        ui.horizontal(|ui| {
+                                            // Enable checkbox
+                                            if ui.checkbox(&mut entry.enabled, "").changed() {
+                                                self.shape_needs_update = true;
+                                            }
+
+                                            // Shape name
+                                            ui.label(entry.shape_type.name());
+
+                                            // Weight slider
+                                            if ui.add(
+                                                egui::Slider::new(&mut entry.weight, 0.1..=3.0)
+                                                    .show_value(false)
+                                            ).changed() {
+                                                self.shape_needs_update = true;
+                                            }
+
+                                            // Move up/down buttons
+                                            if ui.small_button("▲").clicked() {
+                                                to_move_up = Some(i);
+                                            }
+                                            if ui.small_button("▼").clicked() {
+                                                to_move_down = Some(i);
+                                            }
+
+                                            // Remove button
+                                            if ui.small_button("✕").clicked() {
+                                                to_remove = Some(i);
+                                            }
+                                        });
+                                    }
+                                });
+
+                                // Process deferred actions
+                                if let Some(i) = to_remove {
+                                    self.scene_entries.remove(i);
+                                    self.shape_needs_update = true;
+                                }
+                                if let Some(i) = to_move_up {
+                                    if i > 0 {
+                                        self.scene_entries.swap(i, i - 1);
+                                        self.shape_needs_update = true;
+                                    }
+                                }
+                                if let Some(i) = to_move_down {
+                                    if i + 1 < self.scene_entries.len() {
+                                        self.scene_entries.swap(i, i + 1);
+                                        self.shape_needs_update = true;
+                                    }
+                                }
+
+                                ui.separator();
+
+                                if ui.button("Clear All").clicked() {
+                                    self.scene_entries.clear();
+                                    self.shape_needs_update = true;
+                                }
+                            }
+                        }
+                    } // end match editor_mode
 
                     ui.separator();
 
@@ -447,7 +649,7 @@ impl eframe::App for OsciApp {
                     ui.separator();
                     ui.small(format!("Samples: {}", samples.len()));
                     ui.separator();
-                    ui.small("Milestone 4: Basic Shapes");
+                    ui.small("Milestone 5: Scene Composition");
                 });
             });
         });
