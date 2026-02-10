@@ -202,7 +202,13 @@ impl SvgShape {
         }
 
         // Process the root group
-        process_group(tree.root(), &normalize, options, &mut all_points, &mut paths);
+        process_group(
+            tree.root(),
+            &normalize,
+            options,
+            &mut all_points,
+            &mut paths,
+        );
 
         if all_points.is_empty() {
             return Err(SvgError::NoPaths);

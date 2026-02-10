@@ -156,9 +156,9 @@ impl Effect for Translate {
 /// Mirrors points across an axis.
 #[derive(Clone, Copy, PartialEq)]
 pub enum MirrorAxis {
-    Horizontal,  // Mirror across Y axis (flip X)
-    Vertical,    // Mirror across X axis (flip Y)
-    Both,        // Mirror across both axes
+    Horizontal, // Mirror across Y axis (flip X)
+    Vertical,   // Mirror across X axis (flip Y)
+    Both,       // Mirror across both axes
 }
 
 pub struct Mirror {

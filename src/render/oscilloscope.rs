@@ -134,7 +134,12 @@ impl Oscilloscope {
     ///
     /// # Returns
     /// The response from the widget
-    pub fn show(&mut self, ui: &mut egui::Ui, samples: &[XYSample], size: Option<Vec2>) -> egui::Response {
+    pub fn show(
+        &mut self,
+        ui: &mut egui::Ui,
+        samples: &[XYSample],
+        size: Option<Vec2>,
+    ) -> egui::Response {
         // Determine size
         let size = size.unwrap_or_else(|| {
             let available = ui.available_size();
@@ -181,11 +186,17 @@ impl Oscilloscope {
             // Vertical lines
             let x = rect.left() + t * rect.width();
             let stroke = if i == 5 { stroke_axis } else { stroke_grid };
-            painter.line_segment([Pos2::new(x, rect.top()), Pos2::new(x, rect.bottom())], stroke);
+            painter.line_segment(
+                [Pos2::new(x, rect.top()), Pos2::new(x, rect.bottom())],
+                stroke,
+            );
 
             // Horizontal lines
             let y = rect.top() + t * rect.height();
-            painter.line_segment([Pos2::new(rect.left(), y), Pos2::new(rect.right(), y)], stroke);
+            painter.line_segment(
+                [Pos2::new(rect.left(), y), Pos2::new(rect.right(), y)],
+                stroke,
+            );
         }
     }
 

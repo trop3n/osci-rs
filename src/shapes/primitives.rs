@@ -2,8 +2,8 @@
 //!
 //! These are the basic building blocks for oscilloscope graphics.
 
-use std::f32::consts::TAU;
 use super::traits::Shape;
+use std::f32::consts::TAU;
 
 /// A circle centered at (cx, cy) with given radius
 ///
@@ -291,7 +291,11 @@ impl Polygon {
         let vertices: Vec<(f32, f32)> = (0..total_points)
             .map(|i| {
                 let angle = -std::f32::consts::FRAC_PI_2 + (i as f32 / total_points as f32) * TAU;
-                let radius = if i % 2 == 0 { outer_radius } else { inner_radius };
+                let radius = if i % 2 == 0 {
+                    outer_radius
+                } else {
+                    inner_radius
+                };
                 (radius * angle.cos(), radius * angle.sin())
             })
             .collect();

@@ -6,13 +6,13 @@
 //! - LFO (Low Frequency Oscillator) for parameter modulation
 //! - LFO-modulated effects: LfoRotate, LfoScale, LfoTranslate
 
+mod lfo;
 mod traits;
 mod transform;
-mod lfo;
 
 #[allow(unused_imports)]
-pub use traits::{Effect, EffectChain, BoxedEffect};
+pub use lfo::{Lfo, LfoRotate, LfoScale, LfoTranslate, LfoWaveform};
 #[allow(unused_imports)]
-pub use transform::{Rotate, Scale, Translate, Mirror, MirrorAxis};
+pub use traits::{BoxedEffect, Effect, EffectChain};
 #[allow(unused_imports)]
-pub use lfo::{Lfo, LfoWaveform, LfoRotate, LfoScale, LfoTranslate};
+pub use transform::{Mirror, MirrorAxis, Rotate, Scale, Translate};

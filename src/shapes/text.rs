@@ -6,7 +6,7 @@
 //! - Converting Bézier curves to point sequences
 //! - Text layout and positioning
 
-use ab_glyph::{Font, FontRef, ScaleFont, OutlineCurve};
+use ab_glyph::{Font, FontRef, OutlineCurve, ScaleFont};
 use std::path::Path as FilePath;
 use thiserror::Error;
 
@@ -88,14 +88,18 @@ impl TextShape {
             return Err(TextError::EmptyText);
         }
 
-        let font = FontRef::try_from_slice(font_data)
-            .map_err(|e| TextError::FontError(e.to_string()))?;
+        let font =
+            FontRef::try_from_slice(font_data).map_err(|e| TextError::FontError(e.to_string()))?;
 
         Self::render_text(text, &font, options)
     }
 
     /// Render text using a font
-    fn render_text<F: Font>(text: &str, font: &F, options: &TextOptions) -> Result<Self, TextError> {
+    fn render_text<F: Font>(
+        text: &str,
+        font: &F,
+        options: &TextOptions,
+    ) -> Result<Self, TextError> {
         let scaled_font = font.as_scaled(options.size);
 
         let mut all_points: Vec<(f32, f32)> = Vec::new();
@@ -343,7 +347,11 @@ mod tests {
     fn test_text_shape_creation() {
         let options = TextOptions::default();
         let result = TextShape::new("Hi", &options);
-        assert!(result.is_ok(), "Failed to create text shape: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "Failed to create text shape: {:?}",
+            result.err()
+        );
 
         let text_shape = result.unwrap();
         assert_eq!(text_shape.text(), "Hi");

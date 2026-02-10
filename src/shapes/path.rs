@@ -150,7 +150,10 @@ impl Path {
                 let t = i as f32 / num_points as f32 * std::f32::consts::TAU;
                 // Heart curve parametric equations
                 let x = 16.0 * t.sin().powi(3);
-                let y = 13.0 * t.cos() - 5.0 * (2.0 * t).cos() - 2.0 * (3.0 * t).cos() - (4.0 * t).cos();
+                let y = 13.0 * t.cos()
+                    - 5.0 * (2.0 * t).cos()
+                    - 2.0 * (3.0 * t).cos()
+                    - (4.0 * t).cos();
                 // Scale to fit in [-1, 1] range
                 (x * scale / 17.0, y * scale / 17.0)
             })

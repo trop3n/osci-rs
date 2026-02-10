@@ -4,7 +4,7 @@ An oscilloscope music generator inspired by osci-render. Converts vector graphic
 
 ## Current Status
 
-**Completed through Milestone 13** - The app has:
+**Completed through Milestone 16** - The app has:
 - Audio output with cpal (crackling fixed)
 - XY oscilloscope display with persistence/afterglow
 - Settings panel (zoom, line width, intensity, color presets)
@@ -21,7 +21,11 @@ An oscilloscope music generator inspired by osci-render. Converts vector graphic
 - OBJ file loading
 - Built-in 3D primitives (cube, tetrahedron, octahedron, icosahedron)
 - Modular code structure (audio/, render/, shapes/, effects/)
-- Zero compiler warnings
+- Settings persistence (auto-save/load with serde)
+- MIDI CC control with learn mode (10 mappable parameters)
+- CI/CD pipelines (GitHub Actions, 3-platform builds)
+- Release profile (LTO, strip, abort)
+- Zero compiler warnings, zero clippy warnings
 
 ## Project Structure
 
@@ -29,6 +33,9 @@ An oscilloscope music generator inspired by osci-render. Converts vector graphic
 osci-rs/
 ├── Cargo.toml
 ├── PLAN.md                 # This file
+├── .github/workflows/
+│   ├── ci.yml              # CI pipeline (build, test, fmt, clippy)
+│   └── release.yml         # Release pipeline (3-platform binaries)
 ├── docs/                   # Learning journal (Obsidian-ready)
 │   ├── 00-index.md
 │   ├── 01-project-setup.md
@@ -41,9 +48,14 @@ osci-rs/
 │   ├── 09-image-processing.md
 │   ├── 10-fonts-bezier.md
 │   ├── 12-lock-free.md
-│   └── 13-3d-graphics.md
+│   ├── 13-3d-graphics.md
+│   ├── 14-serialization.md
+│   ├── 15-midi.md
+│   └── 16-distribution.md
 └── src/
     ├── main.rs             # App entry point, mode toggle, scene editor
+    ├── midi.rs             # MIDI CC input and parameter mapping
+    ├── settings.rs         # Settings persistence (JSON)
     ├── audio/
     │   ├── mod.rs
     │   ├── buffer.rs       # Lock-free SPSC ring buffer
@@ -169,24 +181,29 @@ osci-rs/
 - [x] Interactive camera controls (orbit, zoom, FOV)
 - [x] `docs/13-3d-graphics.md`
 
-#### Milestone 14: Project Save/Load
-- [ ] Serde serialization
-- [ ] Save/load dialogs
-- [ ] `docs/14-serialization.md`
+#### Milestone 14: Settings Persistence ✅
+- [x] Serde serialization (`serde`, `serde_json`)
+- [x] Auto-save on exit (Drop impl), auto-load on start
+- [x] Platform config directory (`dirs` crate)
+- [x] `docs/14-serialization.md`
 
-#### Milestone 15: MIDI Control
-- [ ] MIDI input (`midir`)
-- [ ] Parameter mapping
-- [ ] `docs/15-midi.md`
+#### Milestone 15: MIDI Control ✅
+- [x] MIDI input (`midir`)
+- [x] Lock-free CC sharing (`AtomicU8` arrays)
+- [x] 10 mappable parameters with MIDI learn
+- [x] Mappings persisted via settings
+- [x] `docs/15-midi.md`
 
-#### Milestone 16: Distribution
-- [ ] Windows/macOS builds
-- [ ] Performance profiling
-- [ ] `docs/16-distribution.md`
+#### Milestone 16: Distribution ✅
+- [x] Release profile (LTO, strip, abort)
+- [x] CI pipeline (build, test, fmt, clippy on 3 platforms)
+- [x] Release pipeline (v* tags, 3-platform binaries)
+- [x] Zero clippy warnings
+- [x] `docs/16-distribution.md`
 
 ---
 
-## Dependencies (Current)
+## Dependencies
 
 ```toml
 [dependencies]
@@ -202,15 +219,10 @@ ab_glyph = "0.2"       # Font handling
 ringbuf = "0.4"        # Lock-free ring buffer
 nalgebra = "0.33"      # Linear algebra for 3D
 tobj = "4.0"           # OBJ file loading
-```
-
-## Dependencies (Planned)
-
-```toml
-# Milestone 14+
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-midir = "0.10"
+serde = { version = "1.0", features = ["derive"] }  # Serialization
+serde_json = "1.0"     # JSON format
+dirs = "6.0"           # Platform config directories
+midir = "0.10"         # MIDI input
 ```
 
 ---

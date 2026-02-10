@@ -323,9 +323,7 @@ impl Mesh {
             (min.z + max.z) / 2.0,
         );
 
-        let size = (max.x - min.x)
-            .max(max.y - min.y)
-            .max(max.z - min.z);
+        let size = (max.x - min.x).max(max.y - min.y).max(max.z - min.z);
 
         let scale = if size > 0.0 { 2.0 / size } else { 1.0 };
 
@@ -495,10 +493,7 @@ impl Mesh3DShape {
     }
 
     /// Create from an OBJ file
-    pub fn from_obj(
-        path: impl AsRef<FilePath>,
-        options: Mesh3DOptions,
-    ) -> Result<Self, MeshError> {
+    pub fn from_obj(path: impl AsRef<FilePath>, options: Mesh3DOptions) -> Result<Self, MeshError> {
         let mut mesh = Mesh::from_obj(path)?;
         mesh.normalize();
         Ok(Self::new(mesh, options))
@@ -565,7 +560,10 @@ impl Mesh3DShape {
             .map(|v| {
                 let clip = vp.transform_point(v);
                 // Perspective divide and convert to [-1, 1]
-                (clip.x / clip.z.abs().max(0.001), clip.y / clip.z.abs().max(0.001))
+                (
+                    clip.x / clip.z.abs().max(0.001),
+                    clip.y / clip.z.abs().max(0.001),
+                )
             })
             .collect();
 

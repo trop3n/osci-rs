@@ -164,7 +164,9 @@ impl Scene {
         self.boundaries.clear();
 
         // Calculate total weight of enabled shapes
-        let total_weight: f32 = self.shapes.iter()
+        let total_weight: f32 = self
+            .shapes
+            .iter()
             .filter(|s| s.enabled)
             .map(|s| s.weight)
             .sum();
@@ -221,7 +223,8 @@ impl Shape for Scene {
 
     fn length(&self) -> f32 {
         // Sum of all shape lengths
-        self.shapes.iter()
+        self.shapes
+            .iter()
             .filter(|s| s.enabled)
             .map(|s| s.shape.length() * s.weight)
             .sum()
@@ -229,7 +232,8 @@ impl Shape for Scene {
 
     fn is_closed(&self) -> bool {
         // Scene is closed if all shapes are closed
-        self.shapes.iter()
+        self.shapes
+            .iter()
             .filter(|s| s.enabled)
             .all(|s| s.shape.is_closed())
     }
@@ -280,8 +284,8 @@ mod tests {
     #[test]
     fn test_weighted_shapes() {
         let mut scene = Scene::new("Weighted");
-        scene.add_weighted(Circle::new(0.5), 2.0);  // Gets 2/3 of time (t=0 to 0.666)
-        scene.add_weighted(Circle::new(0.3), 1.0);  // Gets 1/3 of time (t=0.666 to 1.0)
+        scene.add_weighted(Circle::new(0.5), 2.0); // Gets 2/3 of time (t=0 to 0.666)
+        scene.add_weighted(Circle::new(0.3), 1.0); // Gets 1/3 of time (t=0.666 to 1.0)
 
         // At t=0, should be at start of first circle (radius 0.5)
         // Circle at t=0 gives x=radius, y=0

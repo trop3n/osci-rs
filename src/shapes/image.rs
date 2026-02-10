@@ -148,10 +148,7 @@ impl Shape for ImageShape {
 }
 
 /// Apply Sobel edge detection to a grayscale image
-fn sobel_edge_detection(
-    img: &image::GrayImage,
-    options: &ImageOptions,
-) -> Vec<f32> {
+fn sobel_edge_detection(img: &image::GrayImage, options: &ImageOptions) -> Vec<f32> {
     let (width, height) = img.dimensions();
     let w = width as usize;
     let h = height as usize;
@@ -165,7 +162,11 @@ fn sobel_edge_detection(
     // Get pixel value, handling inversion
     let get_pixel = |x: u32, y: u32| -> f32 {
         let val = img.get_pixel(x, y).0[0] as f32 / 255.0;
-        if options.invert { 1.0 - val } else { val }
+        if options.invert {
+            1.0 - val
+        } else {
+            val
+        }
     };
 
     // Apply Sobel operator
@@ -337,12 +338,7 @@ mod tests {
 
     #[test]
     fn test_nearest_neighbor_sorting() {
-        let points = vec![
-            (0.0, 0.0),
-            (1.0, 0.0),
-            (0.1, 0.0),
-            (0.9, 0.0),
-        ];
+        let points = vec![(0.0, 0.0), (1.0, 0.0), (0.1, 0.0), (0.9, 0.0)];
 
         let sorted = sort_points_nearest_neighbor(&points, 100);
 
@@ -355,10 +351,7 @@ mod tests {
     fn test_extract_points() {
         // Create edge data with some values above threshold
         let edges = vec![
-            0.0, 0.0, 0.0, 0.0,
-            0.0, 0.5, 0.5, 0.0,
-            0.0, 0.5, 0.5, 0.0,
-            0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.5, 0.5, 0.0, 0.0, 0.5, 0.5, 0.0, 0.0, 0.0, 0.0, 0.0,
         ];
 
         let options = ImageOptions {

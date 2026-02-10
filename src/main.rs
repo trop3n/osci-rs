@@ -17,13 +17,18 @@ use eframe::egui;
 
 mod audio;
 mod effects;
+mod midi;
 mod render;
+mod settings;
 mod shapes;
 
 use audio::{AudioEngine, EffectParams, SampleBuffer};
 use effects::LfoWaveform;
 use render::Oscilloscope;
-use shapes::{Circle, Line, Rectangle, Polygon, Path, Scene, SvgShape, SvgOptions, ImageShape, ImageOptions, TextShape, TextOptions, Mesh, Mesh3DShape, Mesh3DOptions, Camera};
+use shapes::{
+    Camera, Circle, ImageOptions, ImageShape, Line, Mesh, Mesh3DOptions, Mesh3DShape, Path,
+    Polygon, Rectangle, Scene, SvgOptions, SvgShape, TextOptions, TextShape,
+};
 
 /// Buffer size for audio samples
 const BUFFER_SIZE: usize = 2048;
@@ -47,7 +52,7 @@ fn main() -> eframe::Result<()> {
 }
 
 /// Available shape types
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
 enum ShapeType {
     Circle,
     Rectangle,
@@ -109,7 +114,7 @@ impl ShapeType {
 }
 
 /// Editor mode - single shape or scene composition
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
 enum EditorMode {
     SingleShape,
     Scene,
@@ -155,7 +160,7 @@ struct ShapeParams {
 }
 
 /// Built-in 3D mesh primitives
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
 enum MeshPrimitive {
     Cube,
     Tetrahedron,
@@ -185,7 +190,7 @@ impl MeshPrimitive {
         }
     }
 
-    fn to_mesh(&self) -> Option<Mesh> {
+    fn to_mesh(self) -> Option<Mesh> {
         match self {
             MeshPrimitive::Cube => Some(Mesh::cube()),
             MeshPrimitive::Tetrahedron => Some(Mesh::tetrahedron()),
@@ -264,6 +269,9 @@ struct OsciApp {
     scale_lfo_max: f32,
     scale_lfo_waveform: LfoWaveform,
 
+    // MIDI controller
+    midi: midi::MidiController,
+
     // Time tracking for effects
     start_time: std::time::Instant,
 }
@@ -277,11 +285,11 @@ impl OsciApp {
         let circle = Circle::new(0.8);
         audio.set_shape(&circle);
 
-        Self {
+        let mut app = Self {
             buffer,
             audio,
             oscilloscope: Oscilloscope::new(),
-            show_settings: true, // Show by default for shape selection
+            show_settings: true,
             editor_mode: EditorMode::SingleShape,
             selected_shape: ShapeType::Circle,
             shape_params: ShapeParams::default(),
@@ -322,8 +330,17 @@ impl OsciApp {
             scale_lfo_max: 1.2,
             scale_lfo_waveform: LfoWaveform::Sine,
 
+            // MIDI
+            midi: midi::MidiController::new(),
+
             start_time: std::time::Instant::now(),
-        }
+        };
+
+        // Load and apply persisted settings
+        let saved = settings::AppSettings::load();
+        saved.apply(&mut app);
+
+        app
     }
 
     /// Create and set the current shape based on selection and parameters
@@ -334,10 +351,7 @@ impl OsciApp {
                 self.audio.set_shape(&shape);
             }
             ShapeType::Rectangle => {
-                let shape = Rectangle::new(
-                    self.shape_params.width,
-                    self.shape_params.height,
-                );
+                let shape = Rectangle::new(self.shape_params.width, self.shape_params.height);
                 self.audio.set_shape(&shape);
             }
             ShapeType::Triangle => {
@@ -495,7 +509,8 @@ impl OsciApp {
                     log::info!(
                         "Loaded image: {} ({}x{}, {} edge points)",
                         path.display(),
-                        w, h,
+                        w,
+                        h,
                         img.point_count()
                     );
                     self.loaded_image = Some(img);
@@ -582,7 +597,10 @@ impl OsciApp {
                         scene.add_weighted(Path::heart(0.7, 200), entry.weight);
                     }
                     ShapeType::Lissajous => {
-                        scene.add_weighted(Path::lissajous(3.0, 2.0, std::f32::consts::FRAC_PI_2, 500), entry.weight);
+                        scene.add_weighted(
+                            Path::lissajous(3.0, 2.0, std::f32::consts::FRAC_PI_2, 500),
+                            entry.weight,
+                        );
                     }
                     ShapeType::Spiral => {
                         scene.add_weighted(Path::spiral(0.1, 0.7, 3.0, 300), entry.weight);
@@ -625,9 +643,21 @@ impl OsciApp {
     }
 }
 
+impl Drop for OsciApp {
+    fn drop(&mut self) {
+        settings::AppSettings::from_app(self).save();
+    }
+}
+
 impl eframe::App for OsciApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         ctx.request_repaint();
+
+        // Poll MIDI and apply CC updates
+        let midi_updates = self.midi.poll();
+        if !midi_updates.is_empty() {
+            midi::apply_updates(&midi_updates, self);
+        }
 
         // Update shape if parameters changed
         if self.shape_needs_update {
@@ -669,11 +699,17 @@ impl eframe::App for OsciApp {
                     // Mode toggle
                     ui.horizontal(|ui| {
                         ui.label("Mode:");
-                        if ui.selectable_label(self.editor_mode == EditorMode::SingleShape, "Single").clicked() {
+                        if ui
+                            .selectable_label(self.editor_mode == EditorMode::SingleShape, "Single")
+                            .clicked()
+                        {
                             self.editor_mode = EditorMode::SingleShape;
                             self.shape_needs_update = true;
                         }
-                        if ui.selectable_label(self.editor_mode == EditorMode::Scene, "Scene").clicked() {
+                        if ui
+                            .selectable_label(self.editor_mode == EditorMode::Scene, "Scene")
+                            .clicked()
+                        {
                             self.editor_mode = EditorMode::Scene;
                             self.shape_needs_update = true;
                         }
@@ -690,11 +726,14 @@ impl eframe::App for OsciApp {
                                 .selected_text(self.selected_shape.name())
                                 .show_ui(ui, |ui| {
                                     for shape_type in ShapeType::all() {
-                                        if ui.selectable_value(
-                                            &mut self.selected_shape,
-                                            *shape_type,
-                                            shape_type.name(),
-                                        ).clicked() {
+                                        if ui
+                                            .selectable_value(
+                                                &mut self.selected_shape,
+                                                *shape_type,
+                                                shape_type.name(),
+                                            )
+                                            .clicked()
+                                        {
                                             self.shape_needs_update = true;
                                         }
                                     }
@@ -702,347 +741,482 @@ impl eframe::App for OsciApp {
 
                             ui.separator();
 
-                    // Shape-specific parameters
-                    ui.label("Parameters:");
+                            // Shape-specific parameters
+                            ui.label("Parameters:");
 
-                    match self.selected_shape {
-                        ShapeType::Circle | ShapeType::Triangle | ShapeType::Square |
-                        ShapeType::Pentagon | ShapeType::Hexagon | ShapeType::Line |
-                        ShapeType::Heart => {
-                            if ui.add(
-                                egui::Slider::new(&mut self.shape_params.size, 0.1..=1.0)
-                                    .text("Size")
-                            ).changed() {
-                                self.shape_needs_update = true;
-                            }
-                        }
+                            match self.selected_shape {
+                                ShapeType::Circle
+                                | ShapeType::Triangle
+                                | ShapeType::Square
+                                | ShapeType::Pentagon
+                                | ShapeType::Hexagon
+                                | ShapeType::Line
+                                | ShapeType::Heart => {
+                                    if ui
+                                        .add(
+                                            egui::Slider::new(
+                                                &mut self.shape_params.size,
+                                                0.1..=1.0,
+                                            )
+                                            .text("Size"),
+                                        )
+                                        .changed()
+                                    {
+                                        self.shape_needs_update = true;
+                                    }
+                                }
 
-                        ShapeType::Rectangle => {
-                            if ui.add(
-                                egui::Slider::new(&mut self.shape_params.width, 0.1..=1.8)
-                                    .text("Width")
-                            ).changed() {
-                                self.shape_needs_update = true;
-                            }
-                            if ui.add(
-                                egui::Slider::new(&mut self.shape_params.height, 0.1..=1.8)
-                                    .text("Height")
-                            ).changed() {
-                                self.shape_needs_update = true;
-                            }
-                        }
+                                ShapeType::Rectangle => {
+                                    if ui
+                                        .add(
+                                            egui::Slider::new(
+                                                &mut self.shape_params.width,
+                                                0.1..=1.8,
+                                            )
+                                            .text("Width"),
+                                        )
+                                        .changed()
+                                    {
+                                        self.shape_needs_update = true;
+                                    }
+                                    if ui
+                                        .add(
+                                            egui::Slider::new(
+                                                &mut self.shape_params.height,
+                                                0.1..=1.8,
+                                            )
+                                            .text("Height"),
+                                        )
+                                        .changed()
+                                    {
+                                        self.shape_needs_update = true;
+                                    }
+                                }
 
-                        ShapeType::Star => {
-                            if ui.add(
-                                egui::Slider::new(&mut self.shape_params.points, 3..=12)
-                                    .text("Points")
-                            ).changed() {
-                                self.shape_needs_update = true;
-                            }
-                            if ui.add(
-                                egui::Slider::new(&mut self.shape_params.size, 0.1..=1.0)
-                                    .text("Outer radius")
-                            ).changed() {
-                                self.shape_needs_update = true;
-                            }
-                            if ui.add(
-                                egui::Slider::new(&mut self.shape_params.inner_radius, 0.1..=0.9)
-                                    .text("Inner radius")
-                            ).changed() {
-                                self.shape_needs_update = true;
-                            }
-                        }
+                                ShapeType::Star => {
+                                    if ui
+                                        .add(
+                                            egui::Slider::new(
+                                                &mut self.shape_params.points,
+                                                3..=12,
+                                            )
+                                            .text("Points"),
+                                        )
+                                        .changed()
+                                    {
+                                        self.shape_needs_update = true;
+                                    }
+                                    if ui
+                                        .add(
+                                            egui::Slider::new(
+                                                &mut self.shape_params.size,
+                                                0.1..=1.0,
+                                            )
+                                            .text("Outer radius"),
+                                        )
+                                        .changed()
+                                    {
+                                        self.shape_needs_update = true;
+                                    }
+                                    if ui
+                                        .add(
+                                            egui::Slider::new(
+                                                &mut self.shape_params.inner_radius,
+                                                0.1..=0.9,
+                                            )
+                                            .text("Inner radius"),
+                                        )
+                                        .changed()
+                                    {
+                                        self.shape_needs_update = true;
+                                    }
+                                }
 
-                        ShapeType::Lissajous => {
-                            if ui.add(
-                                egui::Slider::new(&mut self.shape_params.lissajous_a, 1.0..=10.0)
-                                    .text("A (X freq)")
-                            ).changed() {
-                                self.shape_needs_update = true;
-                            }
-                            if ui.add(
-                                egui::Slider::new(&mut self.shape_params.lissajous_b, 1.0..=10.0)
-                                    .text("B (Y freq)")
-                            ).changed() {
-                                self.shape_needs_update = true;
-                            }
-                            if ui.add(
-                                egui::Slider::new(&mut self.shape_params.lissajous_delta, 0.0..=std::f32::consts::PI)
-                                    .text("Phase")
-                            ).changed() {
-                                self.shape_needs_update = true;
-                            }
-                        }
+                                ShapeType::Lissajous => {
+                                    if ui
+                                        .add(
+                                            egui::Slider::new(
+                                                &mut self.shape_params.lissajous_a,
+                                                1.0..=10.0,
+                                            )
+                                            .text("A (X freq)"),
+                                        )
+                                        .changed()
+                                    {
+                                        self.shape_needs_update = true;
+                                    }
+                                    if ui
+                                        .add(
+                                            egui::Slider::new(
+                                                &mut self.shape_params.lissajous_b,
+                                                1.0..=10.0,
+                                            )
+                                            .text("B (Y freq)"),
+                                        )
+                                        .changed()
+                                    {
+                                        self.shape_needs_update = true;
+                                    }
+                                    if ui
+                                        .add(
+                                            egui::Slider::new(
+                                                &mut self.shape_params.lissajous_delta,
+                                                0.0..=std::f32::consts::PI,
+                                            )
+                                            .text("Phase"),
+                                        )
+                                        .changed()
+                                    {
+                                        self.shape_needs_update = true;
+                                    }
+                                }
 
-                        ShapeType::Spiral => {
-                            if ui.add(
-                                egui::Slider::new(&mut self.shape_params.size, 0.2..=1.0)
-                                    .text("Radius")
-                            ).changed() {
-                                self.shape_needs_update = true;
-                            }
-                            if ui.add(
-                                egui::Slider::new(&mut self.shape_params.spiral_turns, 1.0..=10.0)
-                                    .text("Turns")
-                            ).changed() {
-                                self.shape_needs_update = true;
-                            }
-                        }
+                                ShapeType::Spiral => {
+                                    if ui
+                                        .add(
+                                            egui::Slider::new(
+                                                &mut self.shape_params.size,
+                                                0.2..=1.0,
+                                            )
+                                            .text("Radius"),
+                                        )
+                                        .changed()
+                                    {
+                                        self.shape_needs_update = true;
+                                    }
+                                    if ui
+                                        .add(
+                                            egui::Slider::new(
+                                                &mut self.shape_params.spiral_turns,
+                                                1.0..=10.0,
+                                            )
+                                            .text("Turns"),
+                                        )
+                                        .changed()
+                                    {
+                                        self.shape_needs_update = true;
+                                    }
+                                }
 
-                        ShapeType::Svg => {
-                            // SVG loading UI
-                            if ui.button("Load SVG File...").clicked() {
-                                self.load_svg_file();
-                            }
+                                ShapeType::Svg => {
+                                    // SVG loading UI
+                                    if ui.button("Load SVG File...").clicked() {
+                                        self.load_svg_file();
+                                    }
 
-                            // Show SVG info if loaded
-                            if let Some(ref svg) = self.loaded_svg {
-                                ui.label(format!("Paths: {}", svg.path_count()));
-                                ui.label(format!("Points: {}", svg.point_count()));
-                            } else {
-                                ui.label("No SVG loaded");
-                            }
+                                    // Show SVG info if loaded
+                                    if let Some(ref svg) = self.loaded_svg {
+                                        ui.label(format!("Paths: {}", svg.path_count()));
+                                        ui.label(format!("Points: {}", svg.point_count()));
+                                    } else {
+                                        ui.label("No SVG loaded");
+                                    }
 
-                            // Show error if any
-                            if let Some(ref error) = self.svg_error {
-                                ui.colored_label(egui::Color32::RED, error);
-                            }
+                                    // Show error if any
+                                    if let Some(ref error) = self.svg_error {
+                                        ui.colored_label(egui::Color32::RED, error);
+                                    }
 
-                            ui.separator();
-                            ui.label("SVG Options:");
+                                    ui.separator();
+                                    ui.label("SVG Options:");
 
-                            // Curve samples
-                            if ui.add(
-                                egui::Slider::new(&mut self.svg_options.curve_samples, 2..=32)
-                                    .text("Curve detail")
-                            ).changed() {
-                                // Reload SVG with new options
-                                self.shape_needs_update = true;
-                            }
+                                    // Curve samples
+                                    if ui
+                                        .add(
+                                            egui::Slider::new(
+                                                &mut self.svg_options.curve_samples,
+                                                2..=32,
+                                            )
+                                            .text("Curve detail"),
+                                        )
+                                        .changed()
+                                    {
+                                        // Reload SVG with new options
+                                        self.shape_needs_update = true;
+                                    }
 
-                            // Close paths option
-                            if ui.checkbox(&mut self.svg_options.close_paths, "Close open paths").changed() {
-                                self.shape_needs_update = true;
-                            }
-                        }
+                                    // Close paths option
+                                    if ui
+                                        .checkbox(
+                                            &mut self.svg_options.close_paths,
+                                            "Close open paths",
+                                        )
+                                        .changed()
+                                    {
+                                        self.shape_needs_update = true;
+                                    }
+                                }
 
-                        ShapeType::Image => {
-                            // Image loading UI
-                            if ui.button("Load Image File...").clicked() {
-                                self.load_image_file();
-                            }
+                                ShapeType::Image => {
+                                    // Image loading UI
+                                    if ui.button("Load Image File...").clicked() {
+                                        self.load_image_file();
+                                    }
 
-                            // Show image info if loaded
-                            if let Some(ref img) = self.loaded_image {
-                                let (w, h) = img.dimensions();
-                                ui.label(format!("Size: {}x{}", w, h));
-                                ui.label(format!("Edge points: {}", img.point_count()));
-                            } else {
-                                ui.label("No image loaded");
-                            }
+                                    // Show image info if loaded
+                                    if let Some(ref img) = self.loaded_image {
+                                        let (w, h) = img.dimensions();
+                                        ui.label(format!("Size: {}x{}", w, h));
+                                        ui.label(format!("Edge points: {}", img.point_count()));
+                                    } else {
+                                        ui.label("No image loaded");
+                                    }
 
-                            // Show error if any
-                            if let Some(ref error) = self.image_error {
-                                ui.colored_label(egui::Color32::RED, error);
-                            }
+                                    // Show error if any
+                                    if let Some(ref error) = self.image_error {
+                                        ui.colored_label(egui::Color32::RED, error);
+                                    }
 
-                            ui.separator();
-                            ui.label("Edge Detection:");
+                                    ui.separator();
+                                    ui.label("Edge Detection:");
 
-                            // Threshold slider
-                            if ui.add(
-                                egui::Slider::new(&mut self.image_options.threshold, 0.05..=0.9)
-                                    .text("Threshold")
-                            ).changed() {
-                                self.shape_needs_update = true;
-                            }
+                                    // Threshold slider
+                                    if ui
+                                        .add(
+                                            egui::Slider::new(
+                                                &mut self.image_options.threshold,
+                                                0.05..=0.9,
+                                            )
+                                            .text("Threshold"),
+                                        )
+                                        .changed()
+                                    {
+                                        self.shape_needs_update = true;
+                                    }
 
-                            // Edge minimum
-                            if ui.add(
-                                egui::Slider::new(&mut self.image_options.edge_min, 0.0..=0.5)
-                                    .text("Min edge")
-                            ).changed() {
-                                self.shape_needs_update = true;
-                            }
+                                    // Edge minimum
+                                    if ui
+                                        .add(
+                                            egui::Slider::new(
+                                                &mut self.image_options.edge_min,
+                                                0.0..=0.5,
+                                            )
+                                            .text("Min edge"),
+                                        )
+                                        .changed()
+                                    {
+                                        self.shape_needs_update = true;
+                                    }
 
-                            // Max points
-                            if ui.add(
-                                egui::Slider::new(&mut self.image_options.max_points, 500..=20000)
-                                    .text("Max points")
-                                    .logarithmic(true)
-                            ).changed() {
-                                self.shape_needs_update = true;
-                            }
+                                    // Max points
+                                    if ui
+                                        .add(
+                                            egui::Slider::new(
+                                                &mut self.image_options.max_points,
+                                                500..=20000,
+                                            )
+                                            .text("Max points")
+                                            .logarithmic(true),
+                                        )
+                                        .changed()
+                                    {
+                                        self.shape_needs_update = true;
+                                    }
 
-                            // Invert option
-                            if ui.checkbox(&mut self.image_options.invert, "Invert image").changed() {
-                                self.shape_needs_update = true;
-                            }
+                                    // Invert option
+                                    if ui
+                                        .checkbox(&mut self.image_options.invert, "Invert image")
+                                        .changed()
+                                    {
+                                        self.shape_needs_update = true;
+                                    }
 
-                            // Reload button
-                            if self.loaded_image.is_some() && ui.button("Reload with options").clicked() {
-                                // Need to reload from file - for now just show message
-                                ui.label("Reload from file to apply");
-                            }
-                        }
+                                    // Reload button
+                                    if self.loaded_image.is_some()
+                                        && ui.button("Reload with options").clicked()
+                                    {
+                                        // Need to reload from file - for now just show message
+                                        ui.label("Reload from file to apply");
+                                    }
+                                }
 
-                        ShapeType::Text => {
-                            // Text input
-                            ui.label("Enter text:");
-                            let response = ui.text_edit_singleline(&mut self.text_input);
-                            if response.changed() {
-                                self.shape_needs_update = true;
-                            }
+                                ShapeType::Text => {
+                                    // Text input
+                                    ui.label("Enter text:");
+                                    let response = ui.text_edit_singleline(&mut self.text_input);
+                                    if response.changed() {
+                                        self.shape_needs_update = true;
+                                    }
 
-                            // Show text info if rendered
-                            if let Some(ref text) = self.text_shape {
-                                ui.label(format!("Points: {}", text.point_count()));
-                            }
+                                    // Show text info if rendered
+                                    if let Some(ref text) = self.text_shape {
+                                        ui.label(format!("Points: {}", text.point_count()));
+                                    }
 
-                            // Show error if any
-                            if let Some(ref error) = self.text_error {
-                                ui.colored_label(egui::Color32::RED, error);
-                            }
+                                    // Show error if any
+                                    if let Some(ref error) = self.text_error {
+                                        ui.colored_label(egui::Color32::RED, error);
+                                    }
 
-                            ui.separator();
-                            ui.label("Text Options:");
+                                    ui.separator();
+                                    ui.label("Text Options:");
 
-                            // Font size
-                            if ui.add(
-                                egui::Slider::new(&mut self.text_options.size, 16.0..=128.0)
-                                    .text("Font size")
-                            ).changed() {
-                                self.shape_needs_update = true;
-                            }
+                                    // Font size
+                                    if ui
+                                        .add(
+                                            egui::Slider::new(
+                                                &mut self.text_options.size,
+                                                16.0..=128.0,
+                                            )
+                                            .text("Font size"),
+                                        )
+                                        .changed()
+                                    {
+                                        self.shape_needs_update = true;
+                                    }
 
-                            // Curve detail
-                            if ui.add(
-                                egui::Slider::new(&mut self.text_options.curve_samples, 2..=16)
-                                    .text("Curve detail")
-                            ).changed() {
-                                self.shape_needs_update = true;
-                            }
+                                    // Curve detail
+                                    if ui
+                                        .add(
+                                            egui::Slider::new(
+                                                &mut self.text_options.curve_samples,
+                                                2..=16,
+                                            )
+                                            .text("Curve detail"),
+                                        )
+                                        .changed()
+                                    {
+                                        self.shape_needs_update = true;
+                                    }
 
-                            // Letter spacing
-                            if ui.add(
-                                egui::Slider::new(&mut self.text_options.letter_spacing, 0.5..=2.0)
-                                    .text("Letter spacing")
-                            ).changed() {
-                                self.shape_needs_update = true;
-                            }
-                        }
+                                    // Letter spacing
+                                    if ui
+                                        .add(
+                                            egui::Slider::new(
+                                                &mut self.text_options.letter_spacing,
+                                                0.5..=2.0,
+                                            )
+                                            .text("Letter spacing"),
+                                        )
+                                        .changed()
+                                    {
+                                        self.shape_needs_update = true;
+                                    }
+                                }
 
-                        ShapeType::Mesh3D => {
-                            // Mesh primitive selection
-                            ui.label("Model:");
-                            egui::ComboBox::from_id_salt("mesh_primitive")
-                                .selected_text(self.mesh_primitive.name())
-                                .show_ui(ui, |ui| {
-                                    for primitive in MeshPrimitive::all() {
-                                        if ui.selectable_value(
-                                            &mut self.mesh_primitive,
-                                            *primitive,
-                                            primitive.name(),
-                                        ).clicked() {
+                                ShapeType::Mesh3D => {
+                                    // Mesh primitive selection
+                                    ui.label("Model:");
+                                    egui::ComboBox::from_id_salt("mesh_primitive")
+                                        .selected_text(self.mesh_primitive.name())
+                                        .show_ui(ui, |ui| {
+                                            for primitive in MeshPrimitive::all() {
+                                                if ui
+                                                    .selectable_value(
+                                                        &mut self.mesh_primitive,
+                                                        *primitive,
+                                                        primitive.name(),
+                                                    )
+                                                    .clicked()
+                                                {
+                                                    self.shape_needs_update = true;
+                                                }
+                                            }
+                                        });
+
+                                    // Load OBJ button (for Custom)
+                                    if self.mesh_primitive == MeshPrimitive::Custom
+                                        && ui.button("Load OBJ File...").clicked()
+                                    {
+                                        self.load_obj_file();
+                                    }
+
+                                    // Show mesh info
+                                    let mesh = if self.mesh_primitive == MeshPrimitive::Custom {
+                                        self.loaded_mesh.as_ref()
+                                    } else {
+                                        None
+                                    };
+                                    if let Some(mesh) = mesh {
+                                        ui.label(format!("Vertices: {}", mesh.vertices.len()));
+                                        ui.label(format!("Edges: {}", mesh.edges.len()));
+                                    } else if self.mesh_primitive != MeshPrimitive::Custom {
+                                        if let Some(m) = self.mesh_primitive.to_mesh() {
+                                            ui.label(format!("Vertices: {}", m.vertices.len()));
+                                            ui.label(format!("Edges: {}", m.edges.len()));
+                                        }
+                                    } else {
+                                        ui.label("No mesh loaded");
+                                    }
+
+                                    // Show error if any
+                                    if let Some(ref error) = self.mesh_error {
+                                        ui.colored_label(egui::Color32::RED, error);
+                                    }
+
+                                    ui.separator();
+                                    ui.label("Camera:");
+
+                                    // Camera orbit controls
+                                    ui.horizontal(|ui| {
+                                        if ui.button("↺").clicked() {
+                                            self.mesh_camera.orbit(-0.3, 0.0);
                                             self.shape_needs_update = true;
                                         }
+                                        if ui.button("↻").clicked() {
+                                            self.mesh_camera.orbit(0.3, 0.0);
+                                            self.shape_needs_update = true;
+                                        }
+                                        if ui.button("↑").clicked() {
+                                            self.mesh_camera.orbit(0.0, 0.2);
+                                            self.shape_needs_update = true;
+                                        }
+                                        if ui.button("↓").clicked() {
+                                            self.mesh_camera.orbit(0.0, -0.2);
+                                            self.shape_needs_update = true;
+                                        }
+                                    });
+
+                                    // Zoom controls
+                                    ui.horizontal(|ui| {
+                                        ui.label("Zoom:");
+                                        if ui.button("-").clicked() {
+                                            self.mesh_camera.zoom(1.2);
+                                            self.shape_needs_update = true;
+                                        }
+                                        if ui.button("+").clicked() {
+                                            self.mesh_camera.zoom(0.8);
+                                            self.shape_needs_update = true;
+                                        }
+                                    });
+
+                                    // FOV slider (degrees, converted to radians)
+                                    let mut fov_deg = self.mesh_camera.fov_degrees();
+                                    if ui
+                                        .add(
+                                            egui::Slider::new(&mut fov_deg, 30.0..=120.0)
+                                                .text("FOV"),
+                                        )
+                                        .changed()
+                                    {
+                                        self.mesh_camera.set_fov_degrees(fov_deg);
+                                        self.shape_needs_update = true;
                                     }
-                                });
 
-                            // Load OBJ button (for Custom)
-                            if self.mesh_primitive == MeshPrimitive::Custom {
-                                if ui.button("Load OBJ File...").clicked() {
-                                    self.load_obj_file();
+                                    // Reset camera button
+                                    if ui.button("Reset Camera").clicked() {
+                                        self.mesh_camera = Camera::default();
+                                        self.shape_needs_update = true;
+                                    }
+
+                                    ui.separator();
+                                    ui.label("Rendering:");
+
+                                    // Line detail slider
+                                    if ui
+                                        .add(
+                                            egui::Slider::new(
+                                                &mut self.mesh_options.edge_samples,
+                                                2..=50,
+                                            )
+                                            .text("Edge detail"),
+                                        )
+                                        .changed()
+                                    {
+                                        self.shape_needs_update = true;
+                                    }
                                 }
                             }
-
-                            // Show mesh info
-                            let mesh = if self.mesh_primitive == MeshPrimitive::Custom {
-                                self.loaded_mesh.as_ref()
-                            } else {
-                                None
-                            };
-                            if let Some(mesh) = mesh {
-                                ui.label(format!("Vertices: {}", mesh.vertices.len()));
-                                ui.label(format!("Edges: {}", mesh.edges.len()));
-                            } else if self.mesh_primitive != MeshPrimitive::Custom {
-                                if let Some(m) = self.mesh_primitive.to_mesh() {
-                                    ui.label(format!("Vertices: {}", m.vertices.len()));
-                                    ui.label(format!("Edges: {}", m.edges.len()));
-                                }
-                            } else {
-                                ui.label("No mesh loaded");
-                            }
-
-                            // Show error if any
-                            if let Some(ref error) = self.mesh_error {
-                                ui.colored_label(egui::Color32::RED, error);
-                            }
-
-                            ui.separator();
-                            ui.label("Camera:");
-
-                            // Camera orbit controls
-                            ui.horizontal(|ui| {
-                                if ui.button("↺").clicked() {
-                                    self.mesh_camera.orbit(-0.3, 0.0);
-                                    self.shape_needs_update = true;
-                                }
-                                if ui.button("↻").clicked() {
-                                    self.mesh_camera.orbit(0.3, 0.0);
-                                    self.shape_needs_update = true;
-                                }
-                                if ui.button("↑").clicked() {
-                                    self.mesh_camera.orbit(0.0, 0.2);
-                                    self.shape_needs_update = true;
-                                }
-                                if ui.button("↓").clicked() {
-                                    self.mesh_camera.orbit(0.0, -0.2);
-                                    self.shape_needs_update = true;
-                                }
-                            });
-
-                            // Zoom controls
-                            ui.horizontal(|ui| {
-                                ui.label("Zoom:");
-                                if ui.button("-").clicked() {
-                                    self.mesh_camera.zoom(1.2);
-                                    self.shape_needs_update = true;
-                                }
-                                if ui.button("+").clicked() {
-                                    self.mesh_camera.zoom(0.8);
-                                    self.shape_needs_update = true;
-                                }
-                            });
-
-                            // FOV slider (degrees, converted to radians)
-                            let mut fov_deg = self.mesh_camera.fov_degrees();
-                            if ui.add(
-                                egui::Slider::new(&mut fov_deg, 30.0..=120.0)
-                                    .text("FOV")
-                            ).changed() {
-                                self.mesh_camera.set_fov_degrees(fov_deg);
-                                self.shape_needs_update = true;
-                            }
-
-                            // Reset camera button
-                            if ui.button("Reset Camera").clicked() {
-                                self.mesh_camera = Camera::default();
-                                self.shape_needs_update = true;
-                            }
-
-                            ui.separator();
-                            ui.label("Rendering:");
-
-                            // Line detail slider
-                            if ui.add(
-                                egui::Slider::new(&mut self.mesh_options.edge_samples, 2..=50)
-                                    .text("Edge detail")
-                            ).changed() {
-                                self.shape_needs_update = true;
-                            }
-                        }
-                    }
                         } // end SingleShape
 
                         EditorMode::Scene => {
@@ -1063,7 +1237,8 @@ impl eframe::App for OsciApp {
                                         }
                                     });
                                 if ui.button("+ Add").clicked() {
-                                    self.scene_entries.push(SceneEntry::new(self.scene_shape_to_add));
+                                    self.scene_entries
+                                        .push(SceneEntry::new(self.scene_shape_to_add));
                                     self.shape_needs_update = true;
                                 }
                             });
@@ -1080,40 +1255,49 @@ impl eframe::App for OsciApp {
                                 let mut to_move_up: Option<usize> = None;
                                 let mut to_move_down: Option<usize> = None;
 
-                                egui::ScrollArea::vertical().max_height(200.0).show(ui, |ui| {
-                                    for (i, entry) in self.scene_entries.iter_mut().enumerate() {
-                                        ui.horizontal(|ui| {
-                                            // Enable checkbox
-                                            if ui.checkbox(&mut entry.enabled, "").changed() {
-                                                self.shape_needs_update = true;
-                                            }
+                                egui::ScrollArea::vertical()
+                                    .max_height(200.0)
+                                    .show(ui, |ui| {
+                                        for (i, entry) in self.scene_entries.iter_mut().enumerate()
+                                        {
+                                            ui.horizontal(|ui| {
+                                                // Enable checkbox
+                                                if ui.checkbox(&mut entry.enabled, "").changed() {
+                                                    self.shape_needs_update = true;
+                                                }
 
-                                            // Shape name
-                                            ui.label(entry.shape_type.name());
+                                                // Shape name
+                                                ui.label(entry.shape_type.name());
 
-                                            // Weight slider
-                                            if ui.add(
-                                                egui::Slider::new(&mut entry.weight, 0.1..=3.0)
-                                                    .show_value(false)
-                                            ).changed() {
-                                                self.shape_needs_update = true;
-                                            }
+                                                // Weight slider
+                                                if ui
+                                                    .add(
+                                                        egui::Slider::new(
+                                                            &mut entry.weight,
+                                                            0.1..=3.0,
+                                                        )
+                                                        .show_value(false),
+                                                    )
+                                                    .changed()
+                                                {
+                                                    self.shape_needs_update = true;
+                                                }
 
-                                            // Move up/down buttons
-                                            if ui.small_button("▲").clicked() {
-                                                to_move_up = Some(i);
-                                            }
-                                            if ui.small_button("▼").clicked() {
-                                                to_move_down = Some(i);
-                                            }
+                                                // Move up/down buttons
+                                                if ui.small_button("▲").clicked() {
+                                                    to_move_up = Some(i);
+                                                }
+                                                if ui.small_button("▼").clicked() {
+                                                    to_move_down = Some(i);
+                                                }
 
-                                            // Remove button
-                                            if ui.small_button("✕").clicked() {
-                                                to_remove = Some(i);
-                                            }
-                                        });
-                                    }
-                                });
+                                                // Remove button
+                                                if ui.small_button("✕").clicked() {
+                                                    to_remove = Some(i);
+                                                }
+                                            });
+                                        }
+                                    });
 
                                 // Process deferred actions
                                 if let Some(i) = to_remove {
@@ -1147,18 +1331,24 @@ impl eframe::App for OsciApp {
 
                     // Audio settings
                     ui.collapsing("Audio", |ui| {
-                        if ui.add(
-                            egui::Slider::new(&mut self.audio.config.frequency, 20.0..=200.0)
-                                .text("Speed (Hz)")
-                                .logarithmic(true)
-                        ).changed() {
+                        if ui
+                            .add(
+                                egui::Slider::new(&mut self.audio.config.frequency, 20.0..=200.0)
+                                    .text("Speed (Hz)")
+                                    .logarithmic(true),
+                            )
+                            .changed()
+                        {
                             self.shape_needs_update = true;
                         }
 
-                        if ui.add(
-                            egui::Slider::new(&mut self.audio.config.volume, 0.0..=1.0)
-                                .text("Volume")
-                        ).changed() {
+                        if ui
+                            .add(
+                                egui::Slider::new(&mut self.audio.config.volume, 0.0..=1.0)
+                                    .text("Volume"),
+                            )
+                            .changed()
+                        {
                             self.shape_needs_update = true;
                         }
                     });
@@ -1172,7 +1362,7 @@ impl eframe::App for OsciApp {
                         if self.enable_rotation {
                             ui.add(
                                 egui::Slider::new(&mut self.rotation_speed, -5.0..=5.0)
-                                    .text("Speed (rad/s)")
+                                    .text("Speed (rad/s)"),
                             );
                         }
 
@@ -1183,15 +1373,15 @@ impl eframe::App for OsciApp {
                         if self.enable_scale_lfo {
                             ui.add(
                                 egui::Slider::new(&mut self.scale_lfo_freq, 0.1..=10.0)
-                                    .text("Frequency (Hz)")
+                                    .text("Frequency (Hz)"),
                             );
                             ui.add(
                                 egui::Slider::new(&mut self.scale_lfo_min, 0.1..=1.5)
-                                    .text("Min scale")
+                                    .text("Min scale"),
                             );
                             ui.add(
                                 egui::Slider::new(&mut self.scale_lfo_max, 0.5..=2.0)
-                                    .text("Max scale")
+                                    .text("Max scale"),
                             );
 
                             // Waveform selection
@@ -1224,10 +1414,28 @@ impl eframe::App for OsciApp {
 
                     // Display settings
                     ui.collapsing("Display", |ui| {
-                        ui.add(egui::Slider::new(&mut self.oscilloscope.settings.zoom, 0.1..=2.0).text("Zoom"));
-                        ui.add(egui::Slider::new(&mut self.oscilloscope.settings.line_width, 0.5..=5.0).text("Line width"));
-                        ui.add(egui::Slider::new(&mut self.oscilloscope.settings.intensity, 0.1..=1.0).text("Intensity"));
-                        ui.add(egui::Slider::new(&mut self.oscilloscope.settings.persistence, 0.0..=0.99).text("Persistence"));
+                        ui.add(
+                            egui::Slider::new(&mut self.oscilloscope.settings.zoom, 0.1..=2.0)
+                                .text("Zoom"),
+                        );
+                        ui.add(
+                            egui::Slider::new(
+                                &mut self.oscilloscope.settings.line_width,
+                                0.5..=5.0,
+                            )
+                            .text("Line width"),
+                        );
+                        ui.add(
+                            egui::Slider::new(&mut self.oscilloscope.settings.intensity, 0.1..=1.0)
+                                .text("Intensity"),
+                        );
+                        ui.add(
+                            egui::Slider::new(
+                                &mut self.oscilloscope.settings.persistence,
+                                0.0..=0.99,
+                            )
+                            .text("Persistence"),
+                        );
                         ui.checkbox(&mut self.oscilloscope.settings.show_graticule, "Show grid");
                         ui.checkbox(&mut self.oscilloscope.settings.draw_lines, "Draw lines");
 
@@ -1242,18 +1450,121 @@ impl eframe::App for OsciApp {
                     ui.collapsing("Color", |ui| {
                         ui.horizontal(|ui| {
                             if ui.button("Green").clicked() {
-                                self.oscilloscope.settings.color = egui::Color32::from_rgb(100, 255, 100);
-                                self.oscilloscope.settings.background = egui::Color32::from_rgb(10, 20, 10);
+                                self.oscilloscope.settings.color =
+                                    egui::Color32::from_rgb(100, 255, 100);
+                                self.oscilloscope.settings.background =
+                                    egui::Color32::from_rgb(10, 20, 10);
                             }
                             if ui.button("Amber").clicked() {
-                                self.oscilloscope.settings.color = egui::Color32::from_rgb(255, 176, 0);
-                                self.oscilloscope.settings.background = egui::Color32::from_rgb(20, 15, 5);
+                                self.oscilloscope.settings.color =
+                                    egui::Color32::from_rgb(255, 176, 0);
+                                self.oscilloscope.settings.background =
+                                    egui::Color32::from_rgb(20, 15, 5);
                             }
                             if ui.button("Blue").clicked() {
-                                self.oscilloscope.settings.color = egui::Color32::from_rgb(100, 150, 255);
-                                self.oscilloscope.settings.background = egui::Color32::from_rgb(10, 10, 20);
+                                self.oscilloscope.settings.color =
+                                    egui::Color32::from_rgb(100, 150, 255);
+                                self.oscilloscope.settings.background =
+                                    egui::Color32::from_rgb(10, 10, 20);
                             }
                         });
+                    });
+
+                    ui.separator();
+
+                    // MIDI control
+                    ui.collapsing("MIDI", |ui| {
+                        // Port selection
+                        ui.horizontal(|ui| {
+                            let port_label = if self.midi.ports.is_empty() {
+                                "No ports".to_string()
+                            } else if self.midi.selected_port < self.midi.ports.len() {
+                                self.midi.ports[self.midi.selected_port].clone()
+                            } else {
+                                "Select...".to_string()
+                            };
+
+                            egui::ComboBox::from_id_salt("midi_port")
+                                .selected_text(&port_label)
+                                .show_ui(ui, |ui| {
+                                    for (i, name) in self.midi.ports.iter().enumerate() {
+                                        ui.selectable_value(&mut self.midi.selected_port, i, name);
+                                    }
+                                });
+
+                            if ui.button("Scan").clicked() {
+                                self.midi.scan_ports();
+                            }
+                        });
+
+                        // Connect / Disconnect
+                        let connect_text = if self.midi.is_connected {
+                            "Disconnect"
+                        } else {
+                            "Connect"
+                        };
+                        if ui.button(connect_text).clicked() {
+                            self.midi.toggle();
+                        }
+                        ui.label(&self.midi.status);
+
+                        ui.separator();
+
+                        // Mappings list
+                        ui.label("Mappings:");
+
+                        let mut to_remove: Option<usize> = None;
+                        let mut to_learn: Option<usize> = None;
+                        let mut cancel_learn = false;
+
+                        // Snapshot mapping info to avoid borrow conflict
+                        let mapping_info: Vec<(u8, &str)> = self
+                            .midi
+                            .mappings
+                            .iter()
+                            .map(|m| (m.cc, m.param.name()))
+                            .collect();
+                        let learning = self.midi.learning;
+
+                        for (i, (cc, param_name)) in mapping_info.iter().enumerate() {
+                            ui.horizontal(|ui| {
+                                let is_learning = learning == Some(i);
+                                let label = if is_learning {
+                                    format!("CC ? -> {}", param_name)
+                                } else {
+                                    format!("CC {} -> {}", cc, param_name)
+                                };
+                                ui.label(label);
+
+                                if is_learning {
+                                    if ui.small_button("Cancel").clicked() {
+                                        cancel_learn = true;
+                                    }
+                                } else if ui.small_button("Learn").clicked() {
+                                    to_learn = Some(i);
+                                }
+
+                                if ui.small_button("X").clicked() {
+                                    to_remove = Some(i);
+                                }
+                            });
+                        }
+
+                        if cancel_learn {
+                            self.midi.cancel_learn();
+                        }
+                        if let Some(i) = to_learn {
+                            self.midi.start_learn(i);
+                        }
+                        if let Some(i) = to_remove {
+                            self.midi.remove_mapping(i);
+                        }
+
+                        // Add mapping
+                        let unmapped = self.midi.unmapped_params();
+                        if !unmapped.is_empty() && ui.button("+ Add Mapping").clicked() {
+                            self.midi.add_mapping(0, unmapped[0]);
+                        }
                     });
                 });
         }
@@ -1269,7 +1580,7 @@ impl eframe::App for OsciApp {
                     ui.separator();
                     ui.small(format!("Samples: {}", samples.len()));
                     ui.separator();
-                    ui.small("Milestone 13: 3D Mesh Rendering");
+                    ui.small("Milestone 16: Distribution");
                 });
             });
         });

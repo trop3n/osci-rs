@@ -39,3 +39,18 @@ nalgebra = "0.33"
 
 # OBJ file loading
 tobj = "4.0"
+
+# Settings persistence
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+dirs = "6.0"
+
+# MIDI input
+midir = "0.10"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+strip = true
+panic = "abort"

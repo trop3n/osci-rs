@@ -10,28 +10,28 @@
 //! - Text rendering for converting text to paths
 //! - 3D mesh rendering with wireframe projection
 
-mod traits;
-mod primitives;
+mod image;
+mod mesh3d;
 mod path;
+mod primitives;
 mod scene;
 mod svg;
-mod image;
 mod text;
-mod mesh3d;
+mod traits;
 
-pub use traits::Shape;
-pub use primitives::{Circle, Line, Rectangle, Polygon};
+#[allow(unused_imports)]
+pub use image::{ImageError, ImageOptions, ImageShape};
+#[allow(unused_imports)]
+pub use mesh3d::{Camera, Mesh, Mesh3DOptions, Mesh3DShape, MeshError};
 pub use path::Path;
+pub use primitives::{Circle, Line, Polygon, Rectangle};
 #[allow(unused_imports)]
 pub use scene::{Scene, SceneShape};
 #[allow(unused_imports)]
-pub use svg::{SvgShape, SvgError, SvgOptions};
+pub use svg::{SvgError, SvgOptions, SvgShape};
 #[allow(unused_imports)]
-pub use image::{ImageShape, ImageError, ImageOptions};
-#[allow(unused_imports)]
-pub use text::{TextShape, TextError, TextOptions};
-#[allow(unused_imports)]
-pub use mesh3d::{Mesh, Mesh3DShape, Mesh3DOptions, MeshError, Camera};
+pub use text::{TextError, TextOptions, TextShape};
+pub use traits::Shape;
 
 use crate::audio::XYSample;
 

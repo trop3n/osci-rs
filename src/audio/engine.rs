@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 
 use super::buffer::{SampleBuffer, XYSample};
-use crate::effects::{EffectChain, LfoWaveform, Rotate, LfoScale};
+use crate::effects::{EffectChain, LfoScale, LfoWaveform, Rotate};
 use crate::shapes::Shape;
 
 /// Audio engine configuration
@@ -23,7 +23,7 @@ pub struct AudioConfig {
 impl Default for AudioConfig {
     fn default() -> Self {
         Self {
-            frequency: 80.0,  // 80 Hz = 80 traces per second
+            frequency: 80.0, // 80 Hz = 80 traces per second
             volume: 0.8,
         }
     }
@@ -94,7 +94,7 @@ impl EffectParams {
         if self.scale_lfo_enabled {
             chain.add(
                 LfoScale::new(self.scale_lfo_freq, self.scale_lfo_min, self.scale_lfo_max)
-                    .waveform(self.scale_lfo_waveform)
+                    .waveform(self.scale_lfo_waveform),
             );
         }
 
@@ -107,6 +107,7 @@ impl EffectParams {
 const VIZ_DECIMATION: usize = 8;
 
 /// Write audio samples for any sample format
+#[allow(clippy::too_many_arguments)]
 fn write_audio_samples<T: Sample + FromSample<f32>>(
     data: &mut [T],
     channels: usize,
@@ -155,7 +156,8 @@ fn write_audio_samples<T: Sample + FromSample<f32>>(
     let num_frames = data.len() / channels;
 
     // Try to get effect chain (use empty chain if locked)
-    let chain = effect_params.try_read()
+    let chain = effect_params
+        .try_read()
         .map(|e| e.build_chain())
         .unwrap_or_default();
 
@@ -289,7 +291,10 @@ impl AudioEngine {
         for i in 0..self.samples_per_shape {
             let t = i as f32 / self.samples_per_shape as f32;
             let (x, y) = shape.sample(t);
-            samples.push(XYSample::new(x * self.config.volume, y * self.config.volume));
+            samples.push(XYSample::new(
+                x * self.config.volume,
+                y * self.config.volume,
+            ));
         }
 
         // Update shared shape data
@@ -301,7 +306,11 @@ impl AudioEngine {
         // Reset sample index
         self.sample_index.store(0, Ordering::Relaxed);
 
-        log::info!("Shape set: {} ({} samples)", shape.name(), self.samples_per_shape);
+        log::info!(
+            "Shape set: {} ({} samples)",
+            shape.name(),
+            self.samples_per_shape
+        );
     }
 
     /// Start audio playback
@@ -377,8 +386,15 @@ impl AudioEngine {
                     &config.into(),
                     move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
                         write_audio_samples(
-                            data, channels, &is_playing, &shape_data, &sample_index, &buffer,
-                            &effect_params, &total_samples, sample_rate,
+                            data,
+                            channels,
+                            &is_playing,
+                            &shape_data,
+                            &sample_index,
+                            &buffer,
+                            &effect_params,
+                            &total_samples,
+                            sample_rate,
                         );
                     },
                     |err| log::error!("Audio stream error: {}", err),
@@ -396,8 +412,15 @@ impl AudioEngine {
                     &config.into(),
                     move |data: &mut [i16], _: &cpal::OutputCallbackInfo| {
                         write_audio_samples(
-                            data, channels, &is_playing, &shape_data, &sample_index, &buffer,
-                            &effect_params, &total_samples, sample_rate,
+                            data,
+                            channels,
+                            &is_playing,
+                            &shape_data,
+                            &sample_index,
+                            &buffer,
+                            &effect_params,
+                            &total_samples,
+                            sample_rate,
                         );
                     },
                     |err| log::error!("Audio stream error: {}", err),
@@ -415,8 +438,15 @@ impl AudioEngine {
                     &config.into(),
                     move |data: &mut [u16], _: &cpal::OutputCallbackInfo| {
                         write_audio_samples(
-                            data, channels, &is_playing, &shape_data, &sample_index, &buffer,
-                            &effect_params, &total_samples, sample_rate,
+                            data,
+                            channels,
+                            &is_playing,
+                            &shape_data,
+                            &sample_index,
+                            &buffer,
+                            &effect_params,
+                            &total_samples,
+                            sample_rate,
                         );
                     },
                     |err| log::error!("Audio stream error: {}", err),

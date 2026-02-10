@@ -6,7 +6,7 @@
 use std::f32::consts::TAU;
 
 /// LFO waveform shapes
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
 pub enum LfoWaveform {
     /// Smooth sine wave
     Sine,
@@ -61,16 +61,16 @@ impl LfoWaveform {
             }
 
             LfoWaveform::Square => {
-                if phase < 0.5 { 1.0 } else { -1.0 }
+                if phase < 0.5 {
+                    1.0
+                } else {
+                    -1.0
+                }
             }
 
-            LfoWaveform::Sawtooth => {
-                2.0 * phase - 1.0
-            }
+            LfoWaveform::Sawtooth => 2.0 * phase - 1.0,
 
-            LfoWaveform::ReverseSawtooth => {
-                1.0 - 2.0 * phase
-            }
+            LfoWaveform::ReverseSawtooth => 1.0 - 2.0 * phase,
         }
     }
 }
