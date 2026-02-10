@@ -48,6 +48,10 @@ impl Default for ShapeData {
     }
 }
 
+/// How often to push samples to the visualization buffer
+/// (every Nth sample to reduce lock contention)
+const VIZ_DECIMATION: usize = 8;
+
 /// Write audio samples for any sample format
 fn write_audio_samples<T: Sample + FromSample<f32>>(
     data: &mut [T],
@@ -88,10 +92,14 @@ fn write_audio_samples<T: Sample + FromSample<f32>>(
 
     let num_shape_samples = shape_guard.samples.len();
 
+    // Get current index and calculate new index after this buffer
+    let start_idx = sample_index.load(Ordering::Relaxed);
+    let num_frames = data.len() / channels;
+
     // Generate audio samples
-    for frame in data.chunks_mut(channels) {
-        // Get current sample index and wrap
-        let idx = sample_index.load(Ordering::Relaxed) % num_shape_samples;
+    for (frame_num, frame) in data.chunks_mut(channels).enumerate() {
+        // Calculate wrapped index for this frame
+        let idx = (start_idx + frame_num) % num_shape_samples;
         let xy = shape_guard.samples[idx];
 
         // Output to audio channels (Left = X, Right = Y)
@@ -106,12 +114,15 @@ fn write_audio_samples<T: Sample + FromSample<f32>>(
             frame[0] = T::from_sample((xy.x + xy.y) / 2.0); // Mono mix
         }
 
-        // Push to visualization buffer
-        buffer.push(xy);
-
-        // Advance sample index
-        sample_index.fetch_add(1, Ordering::Relaxed);
+        // Push to visualization buffer less frequently to reduce lock contention
+        if (start_idx + frame_num) % VIZ_DECIMATION == 0 {
+            buffer.push(xy);
+        }
     }
+
+    // Update sample index with wrap-around to prevent overflow
+    let new_idx = (start_idx + num_frames) % num_shape_samples;
+    sample_index.store(new_idx, Ordering::Relaxed);
 }
 
 /// High-level audio output engine
