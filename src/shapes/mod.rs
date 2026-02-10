@@ -6,18 +6,24 @@
 //! - Path type for arbitrary point sequences
 //! - Scene type for composing multiple shapes
 //! - SVG import for loading vector graphics
+//! - Image tracing for converting raster images to paths
+//! - Text rendering for converting text to paths
 
 mod traits;
 mod primitives;
 mod path;
 mod scene;
 mod svg;
+mod image;
+mod text;
 
 pub use traits::Shape;
 pub use primitives::{Circle, Line, Rectangle, Polygon};
 pub use path::Path;
 pub use scene::{Scene, SceneShape};
 pub use svg::{SvgShape, SvgError, SvgOptions};
+pub use image::{ImageShape, ImageError, ImageOptions};
+pub use text::{TextShape, TextError, TextOptions};
 
 use crate::audio::XYSample;
 

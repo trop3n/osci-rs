@@ -16,8 +16,8 @@ Welcome to the osci-rs learning documentation. This series of documents accompan
 - [[06-collections-lifetimes|06 - Collections & Dynamic Dispatch]] - Vec, Box<dyn Trait>, Scene composition
 - 07 - Trait Objects (Effects & Modulation)
 - [[08-error-handling|08 - Error Handling]] - Result, thiserror, SVG import, Bézier curves
-- 09 - Image Processing (Coming Soon)
-- 10 - Fonts & Bézier Curves (Coming Soon)
+- [[09-image-processing|09 - Image Processing]] - Edge detection, Sobel operator, path tracing
+- [[10-fonts-bezier|10 - Fonts & Bézier Curves]] - Text rendering, glyph outlines, curve sampling
 
 ### Phase 3: Advanced (Coming Soon)
 
@@ -101,10 +101,10 @@ osci-rs/
         ├── primitives.rs   # Circle, Line, Rectangle, Polygon
         ├── path.rs         # Arbitrary point sequences
         ├── scene.rs        # Multi-shape composition
-        └── svg.rs          # SVG file import
+        ├── svg.rs          # SVG file import
+        ├── image.rs        # Image edge tracing
+        └── text.rs         # Text to drawable paths
 ```
 
 Coming in future milestones:
-- `shapes/image.rs` - Image edge tracing
-- `shapes/text.rs` - Text to paths
 - `project/` - Save/load state

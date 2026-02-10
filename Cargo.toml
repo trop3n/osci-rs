@@ -24,3 +24,9 @@ rfd = "0.15"
 
 # Error handling
 thiserror = "2.0"
+
+# Image processing
+image = "0.25"
+
+# Font handling
+ab_glyph = "0.2"

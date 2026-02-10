@@ -3,12 +3,11 @@
 //! This application converts vector graphics into XY audio signals
 //! that can be displayed on an oscilloscope.
 //!
-//! ## Milestone 7: SVG Import
+//! ## Milestone 9: Text Rendering
 //! This version adds:
-//! - SVG file loading with usvg
-//! - Bézier curve to point conversion
-//! - File dialogs with rfd
-//! - Custom error types with thiserror
+//! - Font loading with ab_glyph
+//! - Glyph outline extraction
+//! - Text to drawable paths
 
 use eframe::egui;
 
@@ -20,7 +19,7 @@ mod shapes;
 use audio::{AudioEngine, EffectParams, SampleBuffer};
 use effects::LfoWaveform;
 use render::Oscilloscope;
-use shapes::{Circle, Line, Rectangle, Polygon, Path, Scene, SvgShape, SvgOptions};
+use shapes::{Circle, Line, Rectangle, Polygon, Path, Scene, SvgShape, SvgOptions, ImageShape, ImageOptions, TextShape, TextOptions};
 
 /// Buffer size for audio samples
 const BUFFER_SIZE: usize = 2048;
@@ -57,7 +56,9 @@ enum ShapeType {
     Heart,
     Lissajous,
     Spiral,
-    Svg, // Loaded SVG file
+    Svg,   // Loaded SVG file
+    Image, // Traced image file
+    Text,  // Rendered text
 }
 
 impl ShapeType {
@@ -75,6 +76,8 @@ impl ShapeType {
             ShapeType::Lissajous,
             ShapeType::Spiral,
             ShapeType::Svg,
+            ShapeType::Image,
+            ShapeType::Text,
         ]
     }
 
@@ -92,6 +95,8 @@ impl ShapeType {
             ShapeType::Lissajous => "Lissajous",
             ShapeType::Spiral => "Spiral",
             ShapeType::Svg => "SVG File",
+            ShapeType::Image => "Image File",
+            ShapeType::Text => "Text",
         }
     }
 }
@@ -182,6 +187,17 @@ struct OsciApp {
     svg_options: SvgOptions,
     svg_error: Option<String>,
 
+    // Image import
+    loaded_image: Option<ImageShape>,
+    image_options: ImageOptions,
+    image_error: Option<String>,
+
+    // Text rendering
+    text_input: String,
+    text_shape: Option<TextShape>,
+    text_options: TextOptions,
+    text_error: Option<String>,
+
     // Effects
     enable_rotation: bool,
     rotation_speed: f32,
@@ -220,6 +236,17 @@ impl OsciApp {
             loaded_svg: None,
             svg_options: SvgOptions::default(),
             svg_error: None,
+
+            // Image import
+            loaded_image: None,
+            image_options: ImageOptions::default(),
+            image_error: None,
+
+            // Text rendering
+            text_input: "Hello".to_string(),
+            text_shape: None,
+            text_options: TextOptions::default(),
+            text_error: None,
 
             // Effects
             enable_rotation: false,
@@ -309,6 +336,37 @@ impl OsciApp {
                     self.audio.set_shape(&shape);
                 }
             }
+            ShapeType::Image => {
+                // Use loaded image if available
+                if let Some(ref img) = self.loaded_image {
+                    self.audio.set_shape(img);
+                } else {
+                    // No image loaded, show a placeholder circle
+                    let shape = Circle::new(0.5);
+                    self.audio.set_shape(&shape);
+                }
+            }
+            ShapeType::Text => {
+                // Render text if we have input
+                if !self.text_input.is_empty() {
+                    match TextShape::new(&self.text_input, &self.text_options) {
+                        Ok(text) => {
+                            self.audio.set_shape(&text);
+                            self.text_shape = Some(text);
+                            self.text_error = None;
+                        }
+                        Err(e) => {
+                            self.text_error = Some(e.to_string());
+                            // Show placeholder
+                            let shape = Circle::new(0.5);
+                            self.audio.set_shape(&shape);
+                        }
+                    }
+                } else {
+                    let shape = Circle::new(0.5);
+                    self.audio.set_shape(&shape);
+                }
+            }
         }
         self.shape_needs_update = false;
     }
@@ -338,6 +396,41 @@ impl OsciApp {
                 }
             }
         }
+    }
+
+    /// Load an image file using file dialog
+    fn load_image_file(&mut self) {
+        if let Some(path) = rfd::FileDialog::new()
+            .add_filter("Image Files", &["png", "jpg", "jpeg", "gif", "bmp", "webp"])
+            .pick_file()
+        {
+            match ImageShape::load(&path, &self.image_options) {
+                Ok(img) => {
+                    let (w, h) = img.dimensions();
+                    log::info!(
+                        "Loaded image: {} ({}x{}, {} edge points)",
+                        path.display(),
+                        w, h,
+                        img.point_count()
+                    );
+                    self.loaded_image = Some(img);
+                    self.selected_shape = ShapeType::Image;
+                    self.image_error = None;
+                    self.shape_needs_update = true;
+                }
+                Err(e) => {
+                    log::error!("Failed to load image: {}", e);
+                    self.image_error = Some(e.to_string());
+                }
+            }
+        }
+    }
+
+    /// Reload image with current options
+    fn reload_image(&mut self) {
+        // If we have a loaded image, we need to reload from file
+        // For now, just trigger an update - user can reload manually
+        self.shape_needs_update = true;
     }
 
     /// Build and set the scene from scene entries
@@ -383,6 +476,14 @@ impl OsciApp {
                     }
                     ShapeType::Svg => {
                         // SVG in scene not yet supported - use placeholder circle
+                        scene.add_weighted(Circle::new(0.5), entry.weight);
+                    }
+                    ShapeType::Image => {
+                        // Image in scene not yet supported - use placeholder circle
+                        scene.add_weighted(Circle::new(0.5), entry.weight);
+                    }
+                    ShapeType::Text => {
+                        // Text in scene not yet supported - use placeholder circle
                         scene.add_weighted(Circle::new(0.5), entry.weight);
                     }
                 }
@@ -593,6 +694,112 @@ impl eframe::App for OsciApp {
 
                             // Close paths option
                             if ui.checkbox(&mut self.svg_options.close_paths, "Close open paths").changed() {
+                                self.shape_needs_update = true;
+                            }
+                        }
+
+                        ShapeType::Image => {
+                            // Image loading UI
+                            if ui.button("Load Image File...").clicked() {
+                                self.load_image_file();
+                            }
+
+                            // Show image info if loaded
+                            if let Some(ref img) = self.loaded_image {
+                                let (w, h) = img.dimensions();
+                                ui.label(format!("Size: {}x{}", w, h));
+                                ui.label(format!("Edge points: {}", img.point_count()));
+                            } else {
+                                ui.label("No image loaded");
+                            }
+
+                            // Show error if any
+                            if let Some(ref error) = self.image_error {
+                                ui.colored_label(egui::Color32::RED, error);
+                            }
+
+                            ui.separator();
+                            ui.label("Edge Detection:");
+
+                            // Threshold slider
+                            if ui.add(
+                                egui::Slider::new(&mut self.image_options.threshold, 0.05..=0.9)
+                                    .text("Threshold")
+                            ).changed() {
+                                self.shape_needs_update = true;
+                            }
+
+                            // Edge minimum
+                            if ui.add(
+                                egui::Slider::new(&mut self.image_options.edge_min, 0.0..=0.5)
+                                    .text("Min edge")
+                            ).changed() {
+                                self.shape_needs_update = true;
+                            }
+
+                            // Max points
+                            if ui.add(
+                                egui::Slider::new(&mut self.image_options.max_points, 500..=20000)
+                                    .text("Max points")
+                                    .logarithmic(true)
+                            ).changed() {
+                                self.shape_needs_update = true;
+                            }
+
+                            // Invert option
+                            if ui.checkbox(&mut self.image_options.invert, "Invert image").changed() {
+                                self.shape_needs_update = true;
+                            }
+
+                            // Reload button
+                            if self.loaded_image.is_some() && ui.button("Reload with options").clicked() {
+                                // Need to reload from file - for now just show message
+                                ui.label("Reload from file to apply");
+                            }
+                        }
+
+                        ShapeType::Text => {
+                            // Text input
+                            ui.label("Enter text:");
+                            let response = ui.text_edit_singleline(&mut self.text_input);
+                            if response.changed() {
+                                self.shape_needs_update = true;
+                            }
+
+                            // Show text info if rendered
+                            if let Some(ref text) = self.text_shape {
+                                ui.label(format!("Points: {}", text.point_count()));
+                            }
+
+                            // Show error if any
+                            if let Some(ref error) = self.text_error {
+                                ui.colored_label(egui::Color32::RED, error);
+                            }
+
+                            ui.separator();
+                            ui.label("Text Options:");
+
+                            // Font size
+                            if ui.add(
+                                egui::Slider::new(&mut self.text_options.size, 16.0..=128.0)
+                                    .text("Font size")
+                            ).changed() {
+                                self.shape_needs_update = true;
+                            }
+
+                            // Curve detail
+                            if ui.add(
+                                egui::Slider::new(&mut self.text_options.curve_samples, 2..=16)
+                                    .text("Curve detail")
+                            ).changed() {
+                                self.shape_needs_update = true;
+                            }
+
+                            // Letter spacing
+                            if ui.add(
+                                egui::Slider::new(&mut self.text_options.letter_spacing, 0.5..=2.0)
+                                    .text("Letter spacing")
+                            ).changed() {
                                 self.shape_needs_update = true;
                             }
                         }
@@ -822,7 +1029,7 @@ impl eframe::App for OsciApp {
                     ui.separator();
                     ui.small(format!("Samples: {}", samples.len()));
                     ui.separator();
-                    ui.small("Milestone 7: SVG Import");
+                    ui.small("Milestone 9: Text Rendering");
                 });
             });
         });
