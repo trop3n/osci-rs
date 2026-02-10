@@ -5,16 +5,19 @@
 //! - Primitive shapes: Circle, Line, Rectangle, etc.
 //! - Path type for arbitrary point sequences
 //! - Scene type for composing multiple shapes
+//! - SVG import for loading vector graphics
 
 mod traits;
 mod primitives;
 mod path;
 mod scene;
+mod svg;
 
 pub use traits::Shape;
 pub use primitives::{Circle, Line, Rectangle, Polygon};
 pub use path::Path;
 pub use scene::{Scene, SceneShape};
+pub use svg::{SvgShape, SvgError, SvgOptions};
 
 use crate::audio::XYSample;
 

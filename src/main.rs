@@ -3,11 +3,12 @@
 //! This application converts vector graphics into XY audio signals
 //! that can be displayed on an oscilloscope.
 //!
-//! ## Milestone 5: Scene Composition
+//! ## Milestone 7: SVG Import
 //! This version adds:
-//! - Scene type for combining multiple shapes
-//! - Scene editor UI with shape ordering and weights
-//! - Single shape mode and scene mode toggle
+//! - SVG file loading with usvg
+//! - Bézier curve to point conversion
+//! - File dialogs with rfd
+//! - Custom error types with thiserror
 
 use eframe::egui;
 
@@ -19,7 +20,7 @@ mod shapes;
 use audio::{AudioEngine, EffectParams, SampleBuffer};
 use effects::LfoWaveform;
 use render::Oscilloscope;
-use shapes::{Circle, Line, Rectangle, Polygon, Path, Scene};
+use shapes::{Circle, Line, Rectangle, Polygon, Path, Scene, SvgShape, SvgOptions};
 
 /// Buffer size for audio samples
 const BUFFER_SIZE: usize = 2048;
@@ -56,6 +57,7 @@ enum ShapeType {
     Heart,
     Lissajous,
     Spiral,
+    Svg, // Loaded SVG file
 }
 
 impl ShapeType {
@@ -72,6 +74,7 @@ impl ShapeType {
             ShapeType::Heart,
             ShapeType::Lissajous,
             ShapeType::Spiral,
+            ShapeType::Svg,
         ]
     }
 
@@ -88,6 +91,7 @@ impl ShapeType {
             ShapeType::Heart => "Heart",
             ShapeType::Lissajous => "Lissajous",
             ShapeType::Spiral => "Spiral",
+            ShapeType::Svg => "SVG File",
         }
     }
 }
@@ -173,6 +177,11 @@ struct OsciApp {
     scene_entries: Vec<SceneEntry>,
     scene_shape_to_add: ShapeType,
 
+    // SVG import
+    loaded_svg: Option<SvgShape>,
+    svg_options: SvgOptions,
+    svg_error: Option<String>,
+
     // Effects
     enable_rotation: bool,
     rotation_speed: f32,
@@ -206,6 +215,11 @@ impl OsciApp {
             shape_needs_update: false,
             scene_entries: Vec::new(),
             scene_shape_to_add: ShapeType::Circle,
+
+            // SVG import
+            loaded_svg: None,
+            svg_options: SvgOptions::default(),
+            svg_error: None,
 
             // Effects
             enable_rotation: false,
@@ -285,8 +299,45 @@ impl OsciApp {
                 );
                 self.audio.set_shape(&shape);
             }
+            ShapeType::Svg => {
+                // Use loaded SVG if available
+                if let Some(ref svg) = self.loaded_svg {
+                    self.audio.set_shape(svg);
+                } else {
+                    // No SVG loaded, show a placeholder circle
+                    let shape = Circle::new(0.5);
+                    self.audio.set_shape(&shape);
+                }
+            }
         }
         self.shape_needs_update = false;
+    }
+
+    /// Load an SVG file using file dialog
+    fn load_svg_file(&mut self) {
+        if let Some(path) = rfd::FileDialog::new()
+            .add_filter("SVG Files", &["svg"])
+            .pick_file()
+        {
+            match SvgShape::load(&path, &self.svg_options) {
+                Ok(svg) => {
+                    log::info!(
+                        "Loaded SVG: {} ({} paths, {} points)",
+                        path.display(),
+                        svg.path_count(),
+                        svg.point_count()
+                    );
+                    self.loaded_svg = Some(svg);
+                    self.selected_shape = ShapeType::Svg;
+                    self.svg_error = None;
+                    self.shape_needs_update = true;
+                }
+                Err(e) => {
+                    log::error!("Failed to load SVG: {}", e);
+                    self.svg_error = Some(e.to_string());
+                }
+            }
+        }
     }
 
     /// Build and set the scene from scene entries
@@ -329,6 +380,10 @@ impl OsciApp {
                     }
                     ShapeType::Spiral => {
                         scene.add_weighted(Path::spiral(0.1, 0.7, 3.0, 300), entry.weight);
+                    }
+                    ShapeType::Svg => {
+                        // SVG in scene not yet supported - use placeholder circle
+                        scene.add_weighted(Circle::new(0.5), entry.weight);
                     }
                 }
             }
@@ -501,6 +556,43 @@ impl eframe::App for OsciApp {
                                 egui::Slider::new(&mut self.shape_params.spiral_turns, 1.0..=10.0)
                                     .text("Turns")
                             ).changed() {
+                                self.shape_needs_update = true;
+                            }
+                        }
+
+                        ShapeType::Svg => {
+                            // SVG loading UI
+                            if ui.button("Load SVG File...").clicked() {
+                                self.load_svg_file();
+                            }
+
+                            // Show SVG info if loaded
+                            if let Some(ref svg) = self.loaded_svg {
+                                ui.label(format!("Paths: {}", svg.path_count()));
+                                ui.label(format!("Points: {}", svg.point_count()));
+                            } else {
+                                ui.label("No SVG loaded");
+                            }
+
+                            // Show error if any
+                            if let Some(ref error) = self.svg_error {
+                                ui.colored_label(egui::Color32::RED, error);
+                            }
+
+                            ui.separator();
+                            ui.label("SVG Options:");
+
+                            // Curve samples
+                            if ui.add(
+                                egui::Slider::new(&mut self.svg_options.curve_samples, 2..=32)
+                                    .text("Curve detail")
+                            ).changed() {
+                                // Reload SVG with new options
+                                self.shape_needs_update = true;
+                            }
+
+                            // Close paths option
+                            if ui.checkbox(&mut self.svg_options.close_paths, "Close open paths").changed() {
                                 self.shape_needs_update = true;
                             }
                         }
@@ -730,7 +822,7 @@ impl eframe::App for OsciApp {
                     ui.separator();
                     ui.small(format!("Samples: {}", samples.len()));
                     ui.separator();
-                    ui.small("Milestone 6: Effects & Modulation");
+                    ui.small("Milestone 7: SVG Import");
                 });
             });
         });

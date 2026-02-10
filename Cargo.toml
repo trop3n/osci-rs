@@ -15,3 +15,12 @@ cpal = "0.15"
 # Logging
 log = "0.4"
 env_logger = "0.11"
+
+# SVG parsing
+usvg = "0.44"
+
+# File dialogs
+rfd = "0.15"
+
+# Error handling
+thiserror = "2.0"

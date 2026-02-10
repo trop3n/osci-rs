@@ -280,11 +280,21 @@ mod tests {
     #[test]
     fn test_weighted_shapes() {
         let mut scene = Scene::new("Weighted");
-        scene.add_weighted(Circle::new(0.5), 2.0);  // Gets 2/3 of time
-        scene.add_weighted(Circle::new(0.3), 1.0);  // Gets 1/3 of time
+        scene.add_weighted(Circle::new(0.5), 2.0);  // Gets 2/3 of time (t=0 to 0.666)
+        scene.add_weighted(Circle::new(0.3), 1.0);  // Gets 1/3 of time (t=0.666 to 1.0)
 
-        // At t=0.5, should still be in first circle (which goes from 0 to 0.666)
-        let (x, _) = scene.sample(0.5);
-        assert!((x - 0.5).abs() < 0.2); // Should be sampling first circle
+        // At t=0, should be at start of first circle (radius 0.5)
+        // Circle at t=0 gives x=radius, y=0
+        let (x0, y0) = scene.sample(0.0);
+        assert!((x0 - 0.5).abs() < 0.01);
+        assert!(y0.abs() < 0.01);
+
+        // At t=0.8, we're in second circle (0.666 to 1.0)
+        // local_t = (0.8 - 0.666) / (1.0 - 0.666) ≈ 0.4
+        // Second circle has radius 0.3
+        let (x, y) = scene.sample(0.8);
+        // Should be on the second circle (distance from origin ≈ 0.3)
+        let dist = (x * x + y * y).sqrt();
+        assert!((dist - 0.3).abs() < 0.1);
     }
 }

@@ -14,10 +14,10 @@ Welcome to the osci-rs learning documentation. This series of documents accompan
 ### Phase 2: Core Features
 - [[05-traits-generics|05 - Traits & Generics]] - Shape trait, generics, parametric equations
 - [[06-collections-lifetimes|06 - Collections & Dynamic Dispatch]] - Vec, Box<dyn Trait>, Scene composition
-- 07 - Trait Objects (Coming Soon)
-- 08 - Error Handling
-- 09 - Image Processing
-- 10 - Fonts & Bézier Curves
+- 07 - Trait Objects (Effects & Modulation)
+- [[08-error-handling|08 - Error Handling]] - Result, thiserror, SVG import, Bézier curves
+- 09 - Image Processing (Coming Soon)
+- 10 - Fonts & Bézier Curves (Coming Soon)
 
 ### Phase 3: Advanced (Coming Soon)
 
@@ -87,6 +87,11 @@ osci-rs/
     │   ├── mod.rs          # Module exports
     │   ├── engine.rs       # cpal output, shape rendering
     │   └── buffer.rs       # XY sample ring buffer
+    ├── effects/
+    │   ├── mod.rs          # Module exports
+    │   ├── traits.rs       # Effect trait definition
+    │   ├── transform.rs    # Rotate, Scale, Translate, Mirror
+    │   └── lfo.rs          # LFO oscillators and modulated effects
     ├── render/
     │   ├── mod.rs          # Module exports
     │   └── oscilloscope.rs # XY display widget
@@ -95,9 +100,11 @@ osci-rs/
         ├── traits.rs       # Shape trait definition
         ├── primitives.rs   # Circle, Line, Rectangle, Polygon
         ├── path.rs         # Arbitrary point sequences
-        └── scene.rs        # Multi-shape composition
+        ├── scene.rs        # Multi-shape composition
+        └── svg.rs          # SVG file import
 ```
 
 Coming in future milestones:
-- `effects/` - Transform and modulation effects
+- `shapes/image.rs` - Image edge tracing
+- `shapes/text.rs` - Text to paths
 - `project/` - Save/load state
