@@ -19,11 +19,12 @@ Welcome to the osci-rs learning documentation. This series of documents accompan
 - [[09-image-processing|09 - Image Processing]] - Edge detection, Sobel operator, path tracing
 - [[10-fonts-bezier|10 - Fonts & Bézier Curves]] - Text rendering, glyph outlines, curve sampling
 
-### Phase 3: Advanced (Coming Soon)
+### Phase 3: Advanced
 
-- 11 - Audio Files
-- 12 - Lock-Free Programming
-- 13 - 3D Graphics
+- [[12-lock-free|12 - Lock-Free Programming]] - SPSC ring buffers, atomic operations, real-time audio
+- [[13-3d-graphics|13 - 3D Graphics]] - Mesh rendering, perspective projection, OBJ loading
+
+### Coming Soon
 - 14 - Serialization
 - 15 - MIDI
 - 16 - Distribution
@@ -71,6 +72,9 @@ RUST_LOG=debug cargo run
 | **Result** | Either `Ok(value)` or `Err(error)` - for fallible operations |
 | **Closure** | Anonymous function that can capture variables |
 | **Lifetime** | How long a reference is valid |
+| **Lock-free** | Thread-safe without using locks (uses atomics) |
+| **SPSC** | Single-Producer, Single-Consumer (ring buffer pattern) |
+| **Atomic** | Operation that completes in one step, can't be interrupted |
 
 ---
 
@@ -103,7 +107,8 @@ osci-rs/
         ├── scene.rs        # Multi-shape composition
         ├── svg.rs          # SVG file import
         ├── image.rs        # Image edge tracing
-        └── text.rs         # Text to drawable paths
+        ├── text.rs         # Text to drawable paths
+        └── mesh3d.rs       # 3D mesh rendering
 ```
 
 Coming in future milestones:

@@ -46,6 +46,7 @@ impl Default for SvgOptions {
 }
 
 /// An imported SVG containing one or more paths
+#[derive(Clone)]
 pub struct SvgShape {
     /// All paths extracted from the SVG
     paths: Vec<Path>,

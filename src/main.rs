@@ -1,13 +1,17 @@
+// Library modules contain methods for future milestones
+#![allow(dead_code)]
+
 //! osci-rs - Oscilloscope Music Generator
 //!
 //! This application converts vector graphics into XY audio signals
 //! that can be displayed on an oscilloscope.
 //!
-//! ## Milestone 9: Text Rendering
+//! ## Milestone 13: 3D Mesh Rendering
 //! This version adds:
-//! - Font loading with ab_glyph
-//! - Glyph outline extraction
-//! - Text to drawable paths
+//! - 3D mesh loading (OBJ files)
+//! - Built-in primitives (cube, tetrahedron, etc.)
+//! - Camera with perspective projection
+//! - Interactive rotation controls
 
 use eframe::egui;
 
@@ -19,7 +23,7 @@ mod shapes;
 use audio::{AudioEngine, EffectParams, SampleBuffer};
 use effects::LfoWaveform;
 use render::Oscilloscope;
-use shapes::{Circle, Line, Rectangle, Polygon, Path, Scene, SvgShape, SvgOptions, ImageShape, ImageOptions, TextShape, TextOptions};
+use shapes::{Circle, Line, Rectangle, Polygon, Path, Scene, SvgShape, SvgOptions, ImageShape, ImageOptions, TextShape, TextOptions, Mesh, Mesh3DShape, Mesh3DOptions, Camera};
 
 /// Buffer size for audio samples
 const BUFFER_SIZE: usize = 2048;
@@ -56,9 +60,10 @@ enum ShapeType {
     Heart,
     Lissajous,
     Spiral,
-    Svg,   // Loaded SVG file
-    Image, // Traced image file
-    Text,  // Rendered text
+    Svg,    // Loaded SVG file
+    Image,  // Traced image file
+    Text,   // Rendered text
+    Mesh3D, // 3D wireframe mesh
 }
 
 impl ShapeType {
@@ -78,6 +83,7 @@ impl ShapeType {
             ShapeType::Svg,
             ShapeType::Image,
             ShapeType::Text,
+            ShapeType::Mesh3D,
         ]
     }
 
@@ -97,6 +103,7 @@ impl ShapeType {
             ShapeType::Svg => "SVG File",
             ShapeType::Image => "Image File",
             ShapeType::Text => "Text",
+            ShapeType::Mesh3D => "3D Mesh",
         }
     }
 }
@@ -145,6 +152,48 @@ struct ShapeParams {
 
     // Spiral specific
     spiral_turns: f32,
+}
+
+/// Built-in 3D mesh primitives
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum MeshPrimitive {
+    Cube,
+    Tetrahedron,
+    Octahedron,
+    Icosahedron,
+    Custom, // Loaded OBJ file
+}
+
+impl MeshPrimitive {
+    fn all() -> &'static [MeshPrimitive] {
+        &[
+            MeshPrimitive::Cube,
+            MeshPrimitive::Tetrahedron,
+            MeshPrimitive::Octahedron,
+            MeshPrimitive::Icosahedron,
+            MeshPrimitive::Custom,
+        ]
+    }
+
+    fn name(&self) -> &'static str {
+        match self {
+            MeshPrimitive::Cube => "Cube",
+            MeshPrimitive::Tetrahedron => "Tetrahedron",
+            MeshPrimitive::Octahedron => "Octahedron",
+            MeshPrimitive::Icosahedron => "Icosahedron",
+            MeshPrimitive::Custom => "OBJ File",
+        }
+    }
+
+    fn to_mesh(&self) -> Option<Mesh> {
+        match self {
+            MeshPrimitive::Cube => Some(Mesh::cube()),
+            MeshPrimitive::Tetrahedron => Some(Mesh::tetrahedron()),
+            MeshPrimitive::Octahedron => Some(Mesh::octahedron()),
+            MeshPrimitive::Icosahedron => Some(Mesh::icosahedron()),
+            MeshPrimitive::Custom => None, // Loaded from file
+        }
+    }
 }
 
 impl Default for ShapeParams {
@@ -198,6 +247,14 @@ struct OsciApp {
     text_options: TextOptions,
     text_error: Option<String>,
 
+    // 3D mesh rendering
+    loaded_mesh: Option<Mesh>,
+    mesh_shape: Option<Mesh3DShape>,
+    mesh_options: Mesh3DOptions,
+    mesh_camera: Camera,
+    mesh_primitive: MeshPrimitive,
+    mesh_error: Option<String>,
+
     // Effects
     enable_rotation: bool,
     rotation_speed: f32,
@@ -247,6 +304,14 @@ impl OsciApp {
             text_shape: None,
             text_options: TextOptions::default(),
             text_error: None,
+
+            // 3D mesh rendering
+            loaded_mesh: None,
+            mesh_shape: None,
+            mesh_options: Mesh3DOptions::default(),
+            mesh_camera: Camera::default(),
+            mesh_primitive: MeshPrimitive::Cube,
+            mesh_error: None,
 
             // Effects
             enable_rotation: false,
@@ -367,6 +432,26 @@ impl OsciApp {
                     self.audio.set_shape(&shape);
                 }
             }
+            ShapeType::Mesh3D => {
+                // Get the mesh (from primitive or loaded file)
+                let mesh = if self.mesh_primitive == MeshPrimitive::Custom {
+                    self.loaded_mesh.clone()
+                } else {
+                    self.mesh_primitive.to_mesh()
+                };
+
+                if let Some(mesh) = mesh {
+                    let shape = Mesh3DShape::new(mesh, self.mesh_options.clone())
+                        .with_camera(self.mesh_camera.clone());
+                    self.audio.set_shape(&shape);
+                    self.mesh_shape = Some(shape);
+                    self.mesh_error = None;
+                } else {
+                    // No mesh available, show placeholder
+                    let shape = Circle::new(0.5);
+                    self.audio.set_shape(&shape);
+                }
+            }
         }
         self.shape_needs_update = false;
     }
@@ -433,6 +518,34 @@ impl OsciApp {
         self.shape_needs_update = true;
     }
 
+    /// Load an OBJ file using file dialog
+    fn load_obj_file(&mut self) {
+        if let Some(path) = rfd::FileDialog::new()
+            .add_filter("OBJ Files", &["obj"])
+            .pick_file()
+        {
+            match Mesh::from_obj(&path) {
+                Ok(mesh) => {
+                    log::info!(
+                        "Loaded OBJ: {} ({} vertices, {} edges)",
+                        path.display(),
+                        mesh.vertices.len(),
+                        mesh.edges.len()
+                    );
+                    self.loaded_mesh = Some(mesh);
+                    self.mesh_primitive = MeshPrimitive::Custom;
+                    self.selected_shape = ShapeType::Mesh3D;
+                    self.mesh_error = None;
+                    self.shape_needs_update = true;
+                }
+                Err(e) => {
+                    log::error!("Failed to load OBJ: {}", e);
+                    self.mesh_error = Some(e.to_string());
+                }
+            }
+        }
+    }
+
     /// Build and set the scene from scene entries
     fn update_scene(&mut self) {
         let mut scene = Scene::new("Custom Scene");
@@ -475,16 +588,31 @@ impl OsciApp {
                         scene.add_weighted(Path::spiral(0.1, 0.7, 3.0, 300), entry.weight);
                     }
                     ShapeType::Svg => {
-                        // SVG in scene not yet supported - use placeholder circle
-                        scene.add_weighted(Circle::new(0.5), entry.weight);
+                        if let Some(ref svg) = self.loaded_svg {
+                            scene.add_weighted(svg.clone(), entry.weight);
+                        } else {
+                            scene.add_weighted(Circle::new(0.5), entry.weight);
+                        }
                     }
                     ShapeType::Image => {
-                        // Image in scene not yet supported - use placeholder circle
-                        scene.add_weighted(Circle::new(0.5), entry.weight);
+                        if let Some(ref img) = self.loaded_image {
+                            scene.add_weighted(img.clone(), entry.weight);
+                        } else {
+                            scene.add_weighted(Circle::new(0.5), entry.weight);
+                        }
                     }
                     ShapeType::Text => {
-                        // Text in scene not yet supported - use placeholder circle
-                        scene.add_weighted(Circle::new(0.5), entry.weight);
+                        if let Some(ref text) = self.text_shape {
+                            scene.add_weighted(text.clone(), entry.weight);
+                        } else {
+                            scene.add_weighted(Circle::new(0.5), entry.weight);
+                        }
+                    }
+                    ShapeType::Mesh3D => {
+                        // 3D mesh in scene - use cube as default
+                        let mesh = Mesh::cube();
+                        let shape = Mesh3DShape::new(mesh, Mesh3DOptions::default());
+                        scene.add_weighted(shape, entry.weight);
                     }
                 }
             }
@@ -803,6 +931,117 @@ impl eframe::App for OsciApp {
                                 self.shape_needs_update = true;
                             }
                         }
+
+                        ShapeType::Mesh3D => {
+                            // Mesh primitive selection
+                            ui.label("Model:");
+                            egui::ComboBox::from_id_salt("mesh_primitive")
+                                .selected_text(self.mesh_primitive.name())
+                                .show_ui(ui, |ui| {
+                                    for primitive in MeshPrimitive::all() {
+                                        if ui.selectable_value(
+                                            &mut self.mesh_primitive,
+                                            *primitive,
+                                            primitive.name(),
+                                        ).clicked() {
+                                            self.shape_needs_update = true;
+                                        }
+                                    }
+                                });
+
+                            // Load OBJ button (for Custom)
+                            if self.mesh_primitive == MeshPrimitive::Custom {
+                                if ui.button("Load OBJ File...").clicked() {
+                                    self.load_obj_file();
+                                }
+                            }
+
+                            // Show mesh info
+                            let mesh = if self.mesh_primitive == MeshPrimitive::Custom {
+                                self.loaded_mesh.as_ref()
+                            } else {
+                                None
+                            };
+                            if let Some(mesh) = mesh {
+                                ui.label(format!("Vertices: {}", mesh.vertices.len()));
+                                ui.label(format!("Edges: {}", mesh.edges.len()));
+                            } else if self.mesh_primitive != MeshPrimitive::Custom {
+                                if let Some(m) = self.mesh_primitive.to_mesh() {
+                                    ui.label(format!("Vertices: {}", m.vertices.len()));
+                                    ui.label(format!("Edges: {}", m.edges.len()));
+                                }
+                            } else {
+                                ui.label("No mesh loaded");
+                            }
+
+                            // Show error if any
+                            if let Some(ref error) = self.mesh_error {
+                                ui.colored_label(egui::Color32::RED, error);
+                            }
+
+                            ui.separator();
+                            ui.label("Camera:");
+
+                            // Camera orbit controls
+                            ui.horizontal(|ui| {
+                                if ui.button("↺").clicked() {
+                                    self.mesh_camera.orbit(-0.3, 0.0);
+                                    self.shape_needs_update = true;
+                                }
+                                if ui.button("↻").clicked() {
+                                    self.mesh_camera.orbit(0.3, 0.0);
+                                    self.shape_needs_update = true;
+                                }
+                                if ui.button("↑").clicked() {
+                                    self.mesh_camera.orbit(0.0, 0.2);
+                                    self.shape_needs_update = true;
+                                }
+                                if ui.button("↓").clicked() {
+                                    self.mesh_camera.orbit(0.0, -0.2);
+                                    self.shape_needs_update = true;
+                                }
+                            });
+
+                            // Zoom controls
+                            ui.horizontal(|ui| {
+                                ui.label("Zoom:");
+                                if ui.button("-").clicked() {
+                                    self.mesh_camera.zoom(1.2);
+                                    self.shape_needs_update = true;
+                                }
+                                if ui.button("+").clicked() {
+                                    self.mesh_camera.zoom(0.8);
+                                    self.shape_needs_update = true;
+                                }
+                            });
+
+                            // FOV slider (degrees, converted to radians)
+                            let mut fov_deg = self.mesh_camera.fov_degrees();
+                            if ui.add(
+                                egui::Slider::new(&mut fov_deg, 30.0..=120.0)
+                                    .text("FOV")
+                            ).changed() {
+                                self.mesh_camera.set_fov_degrees(fov_deg);
+                                self.shape_needs_update = true;
+                            }
+
+                            // Reset camera button
+                            if ui.button("Reset Camera").clicked() {
+                                self.mesh_camera = Camera::default();
+                                self.shape_needs_update = true;
+                            }
+
+                            ui.separator();
+                            ui.label("Rendering:");
+
+                            // Line detail slider
+                            if ui.add(
+                                egui::Slider::new(&mut self.mesh_options.edge_samples, 2..=50)
+                                    .text("Edge detail")
+                            ).changed() {
+                                self.shape_needs_update = true;
+                            }
+                        }
                     }
                         } // end SingleShape
 
@@ -977,6 +1216,7 @@ impl eframe::App for OsciApp {
                             scale_lfo_min: self.scale_lfo_min,
                             scale_lfo_max: self.scale_lfo_max,
                             scale_lfo_enabled: self.enable_scale_lfo,
+                            scale_lfo_waveform: self.scale_lfo_waveform,
                         });
                     });
 
@@ -1029,7 +1269,7 @@ impl eframe::App for OsciApp {
                     ui.separator();
                     ui.small(format!("Samples: {}", samples.len()));
                     ui.separator();
-                    ui.small("Milestone 9: Text Rendering");
+                    ui.small("Milestone 13: 3D Mesh Rendering");
                 });
             });
         });

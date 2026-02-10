@@ -52,6 +52,7 @@ impl Default for ImageOptions {
 }
 
 /// An image converted to drawable edge paths
+#[derive(Clone)]
 pub struct ImageShape {
     /// Points along detected edges
     points: Vec<(f32, f32)>,

@@ -30,3 +30,12 @@ image = "0.25"
 
 # Font handling
 ab_glyph = "0.2"
+
+# Lock-free ring buffer for audio
+ringbuf = "0.4"
+
+# Linear algebra for 3D graphics
+nalgebra = "0.33"
+
+# OBJ file loading
+tobj = "4.0"

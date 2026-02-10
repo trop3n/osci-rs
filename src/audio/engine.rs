@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 
 use super::buffer::{SampleBuffer, XYSample};
+use crate::effects::{EffectChain, LfoWaveform, Rotate, LfoScale};
 use crate::shapes::Shape;
 
 /// Audio engine configuration
@@ -63,6 +64,8 @@ pub struct EffectParams {
     pub scale_lfo_max: f32,
     /// Whether scale LFO is enabled
     pub scale_lfo_enabled: bool,
+    /// Scale LFO waveform shape
+    pub scale_lfo_waveform: LfoWaveform,
 }
 
 impl Default for EffectParams {
@@ -74,36 +77,29 @@ impl Default for EffectParams {
             scale_lfo_min: 0.8,
             scale_lfo_max: 1.2,
             scale_lfo_enabled: false,
+            scale_lfo_waveform: LfoWaveform::Sine,
         }
     }
 }
 
-/// Apply effects to an XY sample
-fn apply_effects(x: f32, y: f32, time: f32, effects: &EffectParams) -> (f32, f32) {
-    let mut rx = x;
-    let mut ry = y;
+impl EffectParams {
+    /// Build an EffectChain from the current parameters
+    fn build_chain(&self) -> EffectChain {
+        let mut chain = EffectChain::new();
 
-    // Apply rotation
-    if effects.rotation_enabled && effects.rotation_speed != 0.0 {
-        let angle = effects.rotation_speed * time;
-        let cos_a = angle.cos();
-        let sin_a = angle.sin();
-        let new_x = rx * cos_a - ry * sin_a;
-        let new_y = rx * sin_a + ry * cos_a;
-        rx = new_x;
-        ry = new_y;
+        if self.rotation_enabled && self.rotation_speed != 0.0 {
+            chain.add(Rotate::animated(self.rotation_speed));
+        }
+
+        if self.scale_lfo_enabled {
+            chain.add(
+                LfoScale::new(self.scale_lfo_freq, self.scale_lfo_min, self.scale_lfo_max)
+                    .waveform(self.scale_lfo_waveform)
+            );
+        }
+
+        chain
     }
-
-    // Apply scale LFO
-    if effects.scale_lfo_enabled {
-        let phase = (time * effects.scale_lfo_freq * std::f32::consts::TAU).sin();
-        let normalized = (phase + 1.0) / 2.0; // 0.0 to 1.0
-        let scale = effects.scale_lfo_min + normalized * (effects.scale_lfo_max - effects.scale_lfo_min);
-        rx *= scale;
-        ry *= scale;
-    }
-
-    (rx, ry)
 }
 
 /// How often to push samples to the visualization buffer
@@ -158,9 +154,9 @@ fn write_audio_samples<T: Sample + FromSample<f32>>(
     let start_total = total_samples.load(Ordering::Relaxed);
     let num_frames = data.len() / channels;
 
-    // Try to get effect params (use defaults if locked)
-    let effects = effect_params.try_read()
-        .map(|e| e.clone())
+    // Try to get effect chain (use empty chain if locked)
+    let chain = effect_params.try_read()
+        .map(|e| e.build_chain())
         .unwrap_or_default();
 
     // Generate audio samples
@@ -174,7 +170,7 @@ fn write_audio_samples<T: Sample + FromSample<f32>>(
         let time = current_sample as f32 / sample_rate;
 
         // Apply effects
-        let (ex, ey) = apply_effects(xy.x, xy.y, time, &effects);
+        let (ex, ey) = chain.apply(xy.x, xy.y, time);
 
         // Output to audio channels (Left = X, Right = Y)
         if channels >= 2 {

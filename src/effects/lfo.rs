@@ -3,7 +3,7 @@
 //! LFOs generate periodic signals used to modulate effect parameters.
 //! They oscillate between a minimum and maximum value at a specified frequency.
 
-use std::f32::consts::{PI, TAU};
+use std::f32::consts::TAU;
 
 /// LFO waveform shapes
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -45,7 +45,7 @@ impl LfoWaveform {
 
     /// Sample the waveform at phase (0.0 to 1.0)
     /// Returns value in range -1.0 to 1.0
-    fn sample(&self, phase: f32) -> f32 {
+    pub fn sample(&self, phase: f32) -> f32 {
         match self {
             LfoWaveform::Sine => (phase * TAU).sin(),
 

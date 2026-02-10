@@ -4,15 +4,24 @@ An oscilloscope music generator inspired by osci-render. Converts vector graphic
 
 ## Current Status
 
-**Completed through Milestone 5** - The app has:
+**Completed through Milestone 13** - The app has:
 - Audio output with cpal (crackling fixed)
 - XY oscilloscope display with persistence/afterglow
 - Settings panel (zoom, line width, intensity, color presets)
-- Shape trait system with 11 shapes
+- Shape trait system with 11+ shapes
 - Single shape mode with per-shape parameters
-- Scene composition mode (combine multiple shapes)
+- Scene composition mode (combine multiple shapes, including loaded SVG/Image/Text)
 - Scene editor UI with weights, ordering, enable/disable
-- Modular code structure (audio/, render/, shapes/)
+- Effects system using Effect trait chain (rotation, scale LFO with 5 waveforms)
+- SVG file import with Bézier curve support
+- Image tracing via edge detection
+- Text rendering with font support
+- Lock-free audio (SPSC ring buffers)
+- 3D mesh rendering with perspective projection (FOV in degrees)
+- OBJ file loading
+- Built-in 3D primitives (cube, tetrahedron, octahedron, icosahedron)
+- Modular code structure (audio/, render/, shapes/, effects/)
+- Zero compiler warnings
 
 ## Project Structure
 
@@ -27,13 +36,23 @@ osci-rs/
 │   ├── 03-ownership-borrowing.md
 │   ├── 04-egui-basics.md
 │   ├── 05-traits-generics.md
-│   └── 06-collections-lifetimes.md
+│   ├── 06-collections-lifetimes.md
+│   ├── 08-error-handling.md
+│   ├── 09-image-processing.md
+│   ├── 10-fonts-bezier.md
+│   ├── 12-lock-free.md
+│   └── 13-3d-graphics.md
 └── src/
     ├── main.rs             # App entry point, mode toggle, scene editor
     ├── audio/
     │   ├── mod.rs
-    │   ├── buffer.rs       # SampleBuffer, XYSample (Arc<Mutex<T>>)
+    │   ├── buffer.rs       # Lock-free SPSC ring buffer
     │   └── engine.rs       # AudioEngine (cpal output, shape rendering)
+    ├── effects/
+    │   ├── mod.rs
+    │   ├── traits.rs       # Effect trait
+    │   ├── transform.rs    # Rotate, Scale, Translate effects
+    │   └── lfo.rs          # LFO oscillators
     ├── render/
     │   ├── mod.rs
     │   └── oscilloscope.rs # XY display widget with persistence
@@ -41,8 +60,12 @@ osci-rs/
         ├── mod.rs
         ├── traits.rs       # Shape trait definition
         ├── primitives.rs   # Circle, Line, Rectangle, Polygon
-        ├── path.rs         # Arbitrary point sequences (Lissajous, Spiral, Heart)
-        └── scene.rs        # Multi-shape composition with weights
+        ├── path.rs         # Arbitrary point sequences
+        ├── scene.rs        # Multi-shape composition
+        ├── svg.rs          # SVG file import
+        ├── image.rs        # Image edge tracing
+        ├── text.rs         # Text to paths
+        └── mesh3d.rs       # 3D mesh rendering
 ```
 
 ## Tech Stack
@@ -96,53 +119,55 @@ osci-rs/
 - [x] Scene editor UI (add, remove, reorder, enable/disable)
 - [x] `docs/06-collections-lifetimes.md`
 
-#### Milestone 6: Effects & Modulation (Next)
+#### Milestone 6: Effects & Modulation ✅
 **Goal:** Add rotation, scaling, LFOs
 
-- [ ] `Effect` trait
-- [ ] Rotate, Scale, Translate effects
-- [ ] LFO oscillator
-- [ ] Modulation routing
-- [ ] `docs/07-trait-objects.md`
+- [x] `Effect` trait
+- [x] Rotate, Scale, Translate effects
+- [x] LFO oscillator
+- [x] Modulation routing (rotation, scale LFO in UI)
+- [ ] `docs/07-trait-objects.md` (pending)
 
-#### Milestone 7: SVG Import
+#### Milestone 7: SVG Import ✅
 **Goal:** Load SVG files
 
-- [ ] SVG file loading (`usvg`)
-- [ ] Path extraction
-- [ ] Path simplification
-- [ ] File dialog (`rfd`)
-- [ ] `docs/08-error-handling.md`
+- [x] SVG file loading (`usvg`)
+- [x] Path extraction
+- [x] Bézier curve sampling
+- [x] File dialog (`rfd`)
+- [x] `docs/08-error-handling.md`
 
-#### Milestone 8: Image Tracing
+#### Milestone 8: Image Tracing ✅
 **Goal:** Convert images to paths
 
-- [ ] Image loading (`image` crate)
-- [ ] Edge detection
-- [ ] Edge → path conversion
-- [ ] `docs/09-image-processing.md`
+- [x] Image loading (`image` crate)
+- [x] Sobel edge detection
+- [x] Edge → path conversion
+- [x] `docs/09-image-processing.md`
 
-#### Milestone 9: Text Rendering
+#### Milestone 9: Text Rendering ✅
 **Goal:** Render text as graphics
 
-- [ ] Font loading (`ab_glyph`)
-- [ ] Text → path conversion
-- [ ] `docs/10-fonts-bezier.md`
+- [x] Font loading (`ab_glyph`)
+- [x] Text → path conversion
+- [x] `docs/10-fonts-bezier.md`
 
 ---
 
 ### Phase 4: Advanced Features
 
-#### Milestone 12: Lock-Free Audio
-- [ ] Replace `Arc<Mutex<T>>` with lock-free ring buffer
-- [ ] Triple buffer for shape updates
-- [ ] `docs/12-lock-free.md`
+#### Milestone 12: Lock-Free Audio ✅
+- [x] Replace `Arc<Mutex<T>>` with lock-free ring buffer (`ringbuf`)
+- [x] SPSC producer/consumer pattern
+- [x] `docs/12-lock-free.md`
 
-#### Milestone 13: 3D Rendering
-- [ ] 3D wireframe rendering (`nalgebra`)
-- [ ] OBJ file loading
-- [ ] Camera and projection
-- [ ] `docs/13-3d-graphics.md`
+#### Milestone 13: 3D Rendering ✅
+- [x] 3D wireframe rendering (`nalgebra`)
+- [x] OBJ file loading (`tobj`)
+- [x] Camera with perspective projection
+- [x] Built-in primitives (cube, tetrahedron, octahedron, icosahedron)
+- [x] Interactive camera controls (orbit, zoom, FOV)
+- [x] `docs/13-3d-graphics.md`
 
 #### Milestone 14: Project Save/Load
 - [ ] Serde serialization
@@ -169,22 +194,22 @@ eframe = "0.29"
 cpal = "0.15"
 log = "0.4"
 env_logger = "0.11"
+usvg = "0.44"          # SVG parsing
+rfd = "0.15"           # File dialogs
+thiserror = "2.0"      # Error handling
+image = "0.25"         # Image processing
+ab_glyph = "0.2"       # Font handling
+ringbuf = "0.4"        # Lock-free ring buffer
+nalgebra = "0.33"      # Linear algebra for 3D
+tobj = "4.0"           # OBJ file loading
 ```
 
 ## Dependencies (Planned)
 
 ```toml
-# Milestone 7+
-nalgebra = "0.33"
-ringbuf = "0.4"
+# Milestone 14+
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-thiserror = "2.0"
-rfd = "0.15"
-usvg = "0.44"
-image = "0.25"
-ab_glyph = "0.2"
-tobj = "4.0"
 midir = "0.10"
 ```
 
@@ -206,9 +231,14 @@ Click "Play" to generate a circle on the oscilloscope display.
 
 ## Context for AI Assistants
 
-This project is part of a Rust learning journey. The user is a beginner learning Rust by building practical applications. Each milestone introduces new Rust concepts with accompanying documentation in the `docs/` folder.
+This project is part of a Rust learning journey. The user is learning Rust by building practical applications. Each milestone introduces new Rust concepts with accompanying documentation in the `docs/` folder.
 
-The code prioritizes clarity and educational value over maximum performance. For example, we use `Arc<Mutex<T>>` for thread communication (simple to understand) rather than lock-free structures (which come in Milestone 12).
+The codebase now includes:
+- Lock-free audio (SPSC ring buffers from `ringbuf`)
+- Linear algebra (3D transforms with `nalgebra`)
+- File format parsing (SVG with `usvg`, OBJ with `tobj`)
+- Image processing (edge detection)
+- Font rendering (`ab_glyph`)
 
 When continuing development:
 1. Check current milestone status above

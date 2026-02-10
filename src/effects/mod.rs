@@ -10,6 +10,9 @@ mod traits;
 mod transform;
 mod lfo;
 
+#[allow(unused_imports)]
 pub use traits::{Effect, EffectChain, BoxedEffect};
+#[allow(unused_imports)]
 pub use transform::{Rotate, Scale, Translate, Mirror, MirrorAxis};
+#[allow(unused_imports)]
 pub use lfo::{Lfo, LfoWaveform, LfoRotate, LfoScale, LfoTranslate};

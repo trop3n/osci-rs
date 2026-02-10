@@ -1,6 +1,7 @@
 //! Transform effects - Rotate, Scale, Translate
 //!
 //! These effects apply geometric transformations to shape coordinates.
+#![allow(dead_code)]
 
 use super::traits::Effect;
 

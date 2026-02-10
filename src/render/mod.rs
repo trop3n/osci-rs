@@ -6,4 +6,5 @@
 
 mod oscilloscope;
 
+#[allow(unused_imports)]
 pub use oscilloscope::{Oscilloscope, OscilloscopeSettings};

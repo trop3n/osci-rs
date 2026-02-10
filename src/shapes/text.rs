@@ -50,6 +50,7 @@ impl Default for TextOptions {
 }
 
 /// A text string converted to drawable paths
+#[derive(Clone)]
 pub struct TextShape {
     /// All points from the text outline
     points: Vec<(f32, f32)>,
