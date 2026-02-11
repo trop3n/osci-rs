@@ -187,7 +187,7 @@ fn write_audio_samples<T: Sample + FromSample<f32>>(
         }
 
         // Push effected samples to visualization buffer
-        if (start_idx + frame_num) % VIZ_DECIMATION == 0 {
+        if (start_idx + frame_num).is_multiple_of(VIZ_DECIMATION) {
             buffer.push(XYSample::new(ex, ey));
         }
     }
